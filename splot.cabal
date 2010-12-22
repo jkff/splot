@@ -1,0 +1,31 @@
+Name: splot
+Version: 0.1.11
+License: BSD3
+License-file: LICENSE
+Copyright: Eugene Kirpichov, 2010
+Author: Eugene Kirpichov <ekirpichov@gmail.com>
+Maintainer: Eugene Kirpichov <ekirpichov@gmail.com>
+Synopsis: A tool for visualizing the lifecycle of many concurrent multi-staged processes.
+Description: A tool for visualizing the lifecycle of many concurrent multi-staged processes.
+  Each process has a name, it starts at a point in time, ends at a point in time, and at some
+  points in time it changes colour. See presentation <http://www.slideshare.net/jkff/two-visualization-tools>.
+Homepage: http://www.haskell.org/haskellwiki/Splot
+Category: Graphics
+Cabal-Version: >= 1.6
+Build-Type: Simple
+Source-repository head
+  type: git
+  location: git://github.com/jkff/splot
+
+flag splitbase
+  description: Choose the new smaller, split-up base package.
+
+executable splot
+  if flag(splitbase)
+    Build-Depends: base >= 3 && < 5
+  else
+    Build-Depends: base < 3
+
+  Build-Depends: cairo, bytestring, bytestring-lexing, strptime >= 0.1.7, time, 
+                 containers, colour, haskell98, Chart, mtl
+  Main-Is: Tools/StatePlot.hs
