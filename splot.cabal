@@ -1,5 +1,5 @@
 Name: splot
-Version: 0.1.11
+Version: 0.1.12
 License: BSD3
 License-file: LICENSE
 Copyright: Eugene Kirpichov, 2010
@@ -8,7 +8,8 @@ Maintainer: Eugene Kirpichov <ekirpichov@gmail.com>
 Synopsis: A tool for visualizing the lifecycle of many concurrent multi-staged processes.
 Description: A tool for visualizing the lifecycle of many concurrent multi-staged processes.
   Each process has a name, it starts at a point in time, ends at a point in time, and at some
-  points in time it changes colour. See presentation <http://www.slideshare.net/jkff/two-visualization-tools>.
+  points in time it changes colour. See presentation <http://www.slideshare.net/jkff/two-visualization-tools>
+  or download <http://jkff.info/presentations/two-visualization-tools.pdf>.
 Homepage: http://www.haskell.org/haskellwiki/Splot
 Category: Graphics
 Cabal-Version: >= 1.6
