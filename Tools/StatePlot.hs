@@ -24,7 +24,7 @@ import Data.Colour.Names
 
 
 data Event = Event {time :: LocalTime, track :: String, edge :: Edge} deriving (Show)
-data Edge = Begin { color :: String } | End deriving (Show)
+data Edge = Begin { color :: String } | End { color :: String } deriving (Show)
 
 data Bar = Bar Double Double String | ExpiredBar Double Double String
 
@@ -38,9 +38,10 @@ parse parseTime s = Event { time = ts, track = B.unpack $ B.tail track', edge = 
   where
     (ts, s') = parseTime s
     (track', color) = B.break (==' ') (B.tail s')
+    clr = if B.null color then "" else B.unpack (B.tail color)
     edge = case (B.head track') of
-      '>' -> Begin (B.unpack (B.tail color))
-      '<' -> End
+      '>' -> Begin clr
+      '<' -> End clr
 
 diffToMillis :: LocalTime -> LocalTime -> Double
 diffToMillis t2 t1 = fromIntegral (truncate (1000000*d)) / 1000
@@ -72,16 +73,18 @@ renderEvents conf es = Renderable {minsize = return (0,0), render = render'}
     bars track = execWriter . (`evalStateT` Nothing) . mapM_ step . prepare $ track
       where
         prepare  t = (capStart t) ++ t ++ (capEnd t)
-        capEnd   t = [Event maxTime undefined End]
+        capEnd   t = [Event maxTime undefined (End "")]
         capStart t = case (phantomColor conf, t) of
-          (Just c, Event _ _ End:_) -> [Event minTime undefined (Begin c)]
+          (_,      Event _ _ (End c):_) | c /= "" -> [Event minTime undefined (Begin c)]
+          (Just c, Event _ _ (End _):_) -> [Event minTime undefined (Begin c)]
           _                         -> []
 
         step (Event t _ edge) = do
+          let overrideEnd c0 = case edge of { End c | c /= "" -> c ; _ -> c0  }
           get >>= maybeM (\(t0,c0) -> tell $ if (time2ms t - time2ms t0 < expireTimeMs conf) 
-                                             then [Bar (time2ms t0) (time2ms t) c0]
-                                             else [ExpiredBar (time2ms t0) (time2ms t0 + expireTimeMs conf) c0])
-          put (case edge of { Begin c -> Just (t,c); End -> Nothing })
+                                             then [Bar (time2ms t0) (time2ms t) (overrideEnd c0)]
+                                             else [ExpiredBar (time2ms t0) (time2ms t0 + expireTimeMs conf) (overrideEnd c0)])
+          put (case edge of { Begin c -> Just (t,c); End _ -> Nothing })
 
     render' (w,h) = do
       let ms2x ms = 10 + ms / rangeMs * (w - 10)
@@ -151,10 +154,13 @@ showHelp = mapM_ putStrLn [
     "2010-10-21 16:45:10,725 >foo red",
     "2010-10-21 16:45:10,930 >bar blue",
     "2010-10-21 16:45:11,322 <foo",
-    "2010-10-21 16:45:12,508 <bar",
+    "2010-10-21 16:45:12,508 <bar red",
     "",
     "'>FOO COLOR' means 'start a bar of color COLOR on track FOO',",
-    "'<FOO' means 'end the current bar for FOO'."
+    "'<FOO' means 'end the current bar for FOO'.",
+    "'<FOO COLOR' means 'end the current bar for FOO and make the whole bar of color COLOR'",
+    "(for example if we found that FOO failed and all the work since >FOO was wasted, COLOR",
+    "might be red)"
     ]
 
 main = do
