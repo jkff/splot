@@ -101,7 +101,7 @@ renderEvents conf es = Renderable {minsize = return (0,0), render = render'}
       let drawBar i (Bar ms1 ms2 color) = do {
             setLineStyle $ solidLine 1 transparent
           ; setFillStyle $ solidFillStyle $ opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColourName color)
-          ; fillPath (rectPath $ Rect (Point (ms2x ms1) (track2y i)) (Point (ms2x ms2) (track2y i + (barHeight conf)/2)))
+          ; fillPath (rectPath $ Rect (Point (ms2x ms1) (track2y i - (barHeight conf)/2)) (Point (ms2x ms2) (track2y i + (barHeight conf)/2)))
           }
           drawBar i (ExpiredBar ms1 ms2 color) = do {
             setLineStyle $ dashedLine 1 [3,3] (opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColourName color))
