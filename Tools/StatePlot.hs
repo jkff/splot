@@ -175,7 +175,9 @@ main = do
   let parseTime s = fromMaybe (error $ "Invalid time: " ++ show s) . strptime (B.pack timeFormat) $ s
   let outPNG = getArg "o" "" args
   input <- B.getContents
-  let events = parse parseTime `map` B.lines input
+  let pruneLF b | not (B.null b) && (B.last b == '\r') = B.init b
+                | otherwise                            = b
+  let events = (parse parseTime . pruneLF) `map` B.lines input
   let cmpTracks = case getArg "sort" "time"  args of { "time" -> comparing time ; "name" -> comparing track }
   let expireTimeMs = read $ getArg "expire" "Infinity" args
   let phantomColor = case getArg "phantom" "" args of { "" -> Nothing; c -> Just c }
