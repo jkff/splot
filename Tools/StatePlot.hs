@@ -126,8 +126,11 @@ renderEvents conf es = Renderable {minsize = return (0,0), render = render'}
 
 showHelp = mapM_ putStrLn [
     "splot - a tool for visualizing the lifecycle of many concurrent multi-stage processes. See http://www.haskell.org/haskellwiki/Splot",
-    "Usage: splot [-o PNGFILE] [-w WIDTH] [-h HEIGHT] [-bh BARHEIGHT] [-tf TIMEFORMAT] [-sort SORT] [-expire EXPIRE]",
+    "Usage: splot [-if INFILE] [-o PNGFILE] [-w WIDTH] [-h HEIGHT] [-bh BARHEIGHT] ",
+    "             [-tf TIMEFORMAT] [-sort SORT] [-expire EXPIRE]",
     "             [-tickInterval TICKINTERVAL]",
+    "  -if INFILE    - filename from where to read the trace.",
+    "                  If omitted or '-', read from stdin.",
     "  -o PNGFILE    - filename to which the output will be written in PNG format.",
     "                  If omitted, it will be shown in a window.",
     "  -w, -h        - width and height of the resulting picture. Default 640x480.",
@@ -174,7 +177,8 @@ main = do
   let timeFormat = getArg "tf" "%Y-%m-%d %H:%M:%OS" args
   let parseTime s = fromMaybe (error $ "Invalid time: " ++ show s) . strptime (B.pack timeFormat) $ s
   let outPNG = getArg "o" "" args
-  input <- B.getContents
+  let inputFile = getArg "if" "-" args
+  input <- if inputFile == "-" then B.getContents else B.readFile inputFile
   let pruneLF b | not (B.null b) && (B.last b == '\r') = B.init b
                 | otherwise                            = b
   let events = (parse parseTime . pruneLF) `map` B.lines input
