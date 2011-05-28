@@ -20,6 +20,7 @@ import Graphics.Rendering.Chart.Renderable
 import Graphics.Rendering.Chart.Gtk
 import qualified Graphics.Rendering.Cairo as C
 import Data.Colour
+import Data.Colour.SRGB
 import Data.Colour.Names
 
 
@@ -50,20 +51,32 @@ diffToMillis t2 t1 = fromIntegral (truncate (1000000*d)) / 1000
 data RenderConfiguration = RenderConf {
         barHeight :: Double,
         tickIntervalMs :: Double,
+        largeTickFreq :: Int,
         expireTimeMs :: Double,
         cmpTracks :: Event -> Event -> Ordering,
-        phantomColor :: Maybe String
+        phantomColor :: Maybe String,
+        fromTime :: Maybe LocalTime,
+        toTime :: Maybe LocalTime
     }
+
+data TickSize = LargeTick | SmallTick
 
 renderEvents :: RenderConfiguration -> [Event] -> Renderable ()
 renderEvents conf es = Renderable {minsize = return (0,0), render = render'}
   where 
     events = sortBy (comparing time) es
-    minTime = time $ head events
-    maxTime = time $ last events
-    time2ms t = diffToMillis t minTime
-    rangeMs = time2ms maxTime
-    ticks = takeWhile (<rangeMs) $ iterate (+tickIntervalMs conf) 0
+    minInputTime = time $ head events
+    maxInputTime = time $ last events
+    minRenderTime = case fromTime conf of { Nothing -> minInputTime; Just t -> t } 
+    maxRenderTime = case toTime   conf of { Nothing -> maxInputTime; Just t -> t } 
+    time2ms t | t < minRenderTime = time2ms minRenderTime
+              | t > maxRenderTime = time2ms maxRenderTime
+              | otherwise         = diffToMillis t minRenderTime
+    rangeMs = time2ms maxRenderTime
+    ticks = takeWhile ((<rangeMs).snd) $ 
+        map (\i -> if i`mod`largeTickFreq conf == 0 
+                   then (LargeTick, fromIntegral i*tickIntervalMs conf) 
+                   else (SmallTick, fromIntegral i*tickIntervalMs conf)) [0..]
     tracks = sortBy (\as bs -> cmpTracks conf (head as) (head bs)) . groupBy ((==) `on` track) . sortBy (comparing track) $ events
 
     maybeM :: (Monad m) => (a -> m b) -> Maybe a -> m ()
@@ -73,10 +86,10 @@ renderEvents conf es = Renderable {minsize = return (0,0), render = render'}
     bars track = execWriter . (`evalStateT` Nothing) . mapM_ step . prepare $ track
       where
         prepare  t = (capStart t) ++ t ++ (capEnd t)
-        capEnd   t = [Event maxTime undefined (End "")]
+        capEnd   t = [Event maxInputTime undefined (End "")]
         capStart t = case (phantomColor conf, t) of
-          (_,      Event _ _ (End c):_) | c /= "" -> [Event minTime undefined (Begin c)]
-          (Just c, Event _ _ (End _):_) -> [Event minTime undefined (Begin c)]
+          (_,      Event _ _ (End c):_) | c /= "" -> [Event minInputTime undefined (Begin c)]
+          (Just c, Event _ _ (End _):_) -> [Event minInputTime undefined (Begin c)]
           _                         -> []
 
         step (Event t _ edge) = do
@@ -86,40 +99,68 @@ renderEvents conf es = Renderable {minsize = return (0,0), render = render'}
                                              else [ExpiredBar (time2ms t0) (time2ms t0 + expireTimeMs conf) (overrideEnd c0)])
           put (case edge of { Begin c -> Just (t,c); End _ -> Nothing })
 
+    readColour ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
+      where
+        r = fromIntegral $ unhex r2 + 16*unhex r1
+        g = fromIntegral $ unhex g2 + 16*unhex g1
+        b = fromIntegral $ unhex b2 + 16*unhex b1
+        unhex c | c >= '0' && c <= '9' = fromEnum c - fromEnum '0'
+                | c >= 'a' && c <= 'z' = fromEnum c - fromEnum 'a'
+                | c >= 'A' && c <= 'Z' = 10 + fromEnum c - fromEnum 'A'
+    readColour cs = readColourName cs
+
     render' (w,h) = do
       let ms2x ms = 10 + ms / rangeMs * (w - 10)
       let time2x t = ms2x (time2ms t)
       let numTracks = length tracks
-      let yStep = (h-10) / fromIntegral (numTracks+1)
+      let yStep = (h-20) / fromIntegral (numTracks+1)
       let track2y i = fromIntegral (i+1) * yStep - (barHeight conf)/2
-      let drawTick ms = do {
+      let drawTick (t, ms) = do {
           setLineStyle $ solidLine 1 (opaque black)
-        ; moveTo $ Point (ms2x ms) (h-10)
-        ; lineTo $ Point (ms2x ms) (h-5)
+        ; moveTo $ Point (ms2x ms) (h-20)
+        ; lineTo $ Point (ms2x ms) (h-case t of { LargeTick -> 13 ; SmallTick -> 17 })
+        ; c $ C.stroke
+        }
+          
+      let fillRectAA (Point x1 y1) (Point x2 y2) = do {
+          c $ C.newPath
+        ; c $ C.moveTo x1 y1
+        ; c $ C.lineTo x1 y2
+        ; c $ C.lineTo x2 y2
+        ; c $ C.lineTo x2 y1
+        ; c $ C.closePath
+        ; c $ C.fill
+        }
+      let strokeLineAA (Point x1 y1) (Point x2 y2) = do {
+          c $ C.newPath
+        ; c $ C.moveTo x1 y1
+        ; c $ C.lineTo x2 y2
         ; c $ C.stroke
         }
       let drawBar i (Bar ms1 ms2 color) = do {
             setLineStyle $ solidLine 1 transparent
-          ; setFillStyle $ solidFillStyle $ opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColourName color)
-          ; fillPath (rectPath $ Rect (Point (ms2x ms1) (track2y i - (barHeight conf)/2)) (Point (ms2x ms2) (track2y i + (barHeight conf)/2)))
+          ; setFillStyle $ solidFillStyle $ opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color)
+          ; fillRectAA (Point (ms2x ms1) (track2y i - (barHeight conf)/2)) (Point (ms2x ms2) (track2y i + (barHeight conf)/2))
           }
           drawBar i (ExpiredBar ms1 ms2 color) = do {
-            setLineStyle $ dashedLine 1 [3,3] (opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColourName color))
-          ; strokePath [Point (ms2x ms1) (track2y i), Point (ms2x ms2) (track2y i)]
+            setLineStyle $ dashedLine 1 [3,3] (opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color))
+          ; strokeLineAA (Point (ms2x ms1) (track2y i)) (Point (ms2x ms2) (track2y i))
           ; setLineStyle $ solidLine 1 (opaque red)
-          ; strokePath [Point (ms2x ms2 - 5) (track2y i - 5), Point (ms2x ms2 + 5) (track2y i + 5)]
-          ; strokePath [Point (ms2x ms2 + 5) (track2y i - 5), Point (ms2x ms2 - 5) (track2y i + 5)]
+          ; strokeLineAA (Point (ms2x ms2 - 5) (track2y i - 5)) (Point (ms2x ms2 + 5) (track2y i + 5))
+          ; strokeLineAA (Point (ms2x ms2 + 5) (track2y i - 5)) (Point (ms2x ms2 - 5) (track2y i + 5))
           }
       let drawTrack (i, es) = mapM_ (drawBar i) (bars es)
       setFillStyle $ solidFillStyle (opaque white)
       fillPath $ rectPath $ Rect (Point 0 0) (Point w h)
       setLineStyle $ solidLine 1 (opaque black)
-      moveTo (Point 10 (h-10))
-      lineTo (Point w  (h-10))
+      moveTo (Point 10 (h-20))
+      lineTo (Point w  (h-20))
       c $ C.stroke
-      moveTo (Point 10 (h-10))
+      moveTo (Point 10 (h-20))
       lineTo (Point 10 0)
       c $ C.stroke
+      moveTo (Point 10 (h-3))
+      c $ C.showText $ "Origin at " ++ show minRenderTime ++ ", 1 small tick = " ++ show (tickIntervalMs conf) ++ "ms"
       mapM_ drawTick ticks
       mapM_ drawTrack $ zip [0..] tracks
       return nullPickFn
@@ -128,7 +169,8 @@ showHelp = mapM_ putStrLn [
     "splot - a tool for visualizing the lifecycle of many concurrent multi-stage processes. See http://www.haskell.org/haskellwiki/Splot",
     "Usage: splot [-if INFILE] [-o PNGFILE] [-w WIDTH] [-h HEIGHT] [-bh BARHEIGHT] ",
     "             [-tf TIMEFORMAT] [-sort SORT] [-expire EXPIRE]",
-    "             [-tickInterval TICKINTERVAL]",
+    "             [-fromTime TIME] [-toTime TIME]",
+    "             [-tickInterval TICKINTERVAL] [-largeTickFreq N]",
     "  -if INFILE    - filename from where to read the trace.",
     "                  If omitted or '-', read from stdin.",
     "  -o PNGFILE    - filename to which the output will be written in PNG format.",
@@ -140,7 +182,8 @@ showHelp = mapM_ putStrLn [
     "                  fractional seconds supported via %OS - will parse 12.4039 or 12,4039",
     "                  Also, %^[+-][N]s will parse seconds since the epoch, for example ",
     "                  %^-3s are milliseconds since the epoch (N can only be 1 digit)",
-    "  -tickInterval - ticks on the X axis will be this often (in millis).",
+    "  -tickInterval - ticks on the X axis will be this often (in millis, default 1000).",
+    "  -largeTickFreq N - every N'th tick will be larger than the others (default 10).",
     "  -sort SORT    - sort tracks by SORT, where: 'time' - sort by time of first event, ",
     "                  'name' - sort by track name.",
     "  -expire       - expire activities after given time period (in millis) - for instance,",
@@ -154,7 +197,7 @@ showHelp = mapM_ putStrLn [
     "2010-10-21 16:45:09,431 >foo green",
     "2010-10-21 16:45:09,541 >bar green",
     "2010-10-21 16:45:10,631 >foo yellow",
-    "2010-10-21 16:45:10,725 >foo red",
+    "2010-10-21 16:45:10,725 >foo #ff0000",
     "2010-10-21 16:45:10,930 >bar blue",
     "2010-10-21 16:45:11,322 <foo",
     "2010-10-21 16:45:12,508 <bar red",
@@ -173,9 +216,12 @@ main = do
     _          -> return ()
   let (w,h) = (read $ getArg "w" "640" args, read $ getArg "h" "480" args)
   let barHeight = read $ getArg "bh" "5" args
-  let tickIntervalMs = read $ getArg "tickInterval" "10" args
+  let tickIntervalMs = read $ getArg "tickInterval" "1000" args
+  let largeTickFreq = read $ getArg "largeTickFreq" "10" args
   let timeFormat = getArg "tf" "%Y-%m-%d %H:%M:%OS" args
   let parseTime s = fromMaybe (error $ "Invalid time: " ++ show s) . strptime (B.pack timeFormat) $ s
+  let fromTime = fst `fmap` (strptime timeFormat $ getArg "fromTime" "" args)
+  let toTime = fst `fmap` (strptime timeFormat $ getArg "toTime" "" args)
   let outPNG = getArg "o" "" args
   let inputFile = getArg "if" "-" args
   input <- if inputFile == "-" then B.getContents else B.readFile inputFile
@@ -185,7 +231,7 @@ main = do
   let cmpTracks = case getArg "sort" "time"  args of { "time" -> comparing time ; "name" -> comparing track }
   let expireTimeMs = read $ getArg "expire" "Infinity" args
   let phantomColor = case getArg "phantom" "" args of { "" -> Nothing; c -> Just c }
-  let pic = renderEvents (RenderConf barHeight tickIntervalMs expireTimeMs cmpTracks phantomColor) events
+  let pic = renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime) events
   case outPNG of
     "" -> renderableToWindow pic w h
     f  -> const () `fmap` renderableToPNGFile pic w h outPNG
