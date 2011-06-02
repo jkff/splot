@@ -48,8 +48,10 @@ diffToMillis :: LocalTime -> LocalTime -> Double
 diffToMillis t2 t1 = fromIntegral (truncate (1000000*d)) / 1000
  where d = diffUTCTime (localTimeToUTC utc t2) (localTimeToUTC utc t1)
 
+data BarHeight = BarHeightFixed Double | BarHeightFill
+
 data RenderConfiguration = RenderConf {
-        barHeight :: Double,
+        barHeight :: BarHeight,
         tickIntervalMs :: Double,
         largeTickFreq :: Int,
         expireTimeMs :: Double,
@@ -113,8 +115,14 @@ renderEvents conf es = Renderable {minsize = return (0,0), render = render'}
       let ms2x ms = 10 + ms / rangeMs * (w - 10)
       let time2x t = ms2x (time2ms t)
       let numTracks = length tracks
-      let yStep = (h-20) / fromIntegral (numTracks+1)
-      let track2y i = fromIntegral (i+1) * yStep - (barHeight conf)/2
+      let yStep = case barHeight conf of {
+          BarHeightFixed _ -> (h-20) / fromIntegral (numTracks+1)
+        ; BarHeightFill    -> (h-20) / fromIntegral numTracks
+        }
+      let track2y i = case barHeight conf of {
+          BarHeightFixed bh -> fromIntegral (i+1) * yStep - bh/2
+        ; BarHeightFill     -> fromIntegral (i+1) * yStep - yStep/2
+        }
       let drawTick (t, ms) = do {
           setLineStyle $ solidLine 1 (opaque black)
         ; moveTo $ Point (ms2x ms) (h-20)
@@ -140,7 +148,10 @@ renderEvents conf es = Renderable {minsize = return (0,0), render = render'}
       let drawBar i (Bar ms1 ms2 color) = do {
             setLineStyle $ solidLine 1 transparent
           ; setFillStyle $ solidFillStyle $ opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color)
-          ; fillRectAA (Point (ms2x ms1) (track2y i - (barHeight conf)/2)) (Point (ms2x ms2) (track2y i + (barHeight conf)/2))
+          ; case barHeight conf of {
+              BarHeightFixed bh -> fillRectAA (Point (ms2x ms1) (track2y i - bh   /2)) (Point (ms2x ms2) (track2y i + bh   /2))
+            ; BarHeightFill     -> fillRectAA (Point (ms2x ms1) (track2y i - yStep/2)) (Point (ms2x ms2) (track2y i + yStep/2))
+            }
           }
           drawBar i (ExpiredBar ms1 ms2 color) = do {
             setLineStyle $ dashedLine 1 [3,3] (opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color))
@@ -177,7 +188,8 @@ showHelp = mapM_ putStrLn [
     "                  If omitted, it will be shown in a window.",
     "  -w, -h        - width and height of the resulting picture. Default 640x480.",
     "  -bh           - height of the bar depicting each individual process. Default 5 pixels.",
-    "                  Use 1 or so if you have a lot of them.",
+    "                  Use 1 or so, or 'fill' if you have a lot of them. ",
+    "                  '-bh fill' means 'fill the screen with bars, without vertical gaps'",
     "  -tf           - time format, as in http://linux.die.net/man/3/strptime but with ",
     "                  fractional seconds supported via %OS - will parse 12.4039 or 12,4039",
     "                  Also, %^[+-][N]s will parse seconds since the epoch, for example ",
@@ -215,7 +227,7 @@ main = do
     ["--help"] -> showHelp >> exitSuccess
     _          -> return ()
   let (w,h) = (read $ getArg "w" "640" args, read $ getArg "h" "480" args)
-  let barHeight = read $ getArg "bh" "5" args
+  let barHeight = case getArg "bh" "5" args of { "fill" -> BarHeightFill ; bh -> BarHeightFixed $ read bh }
   let tickIntervalMs = read $ getArg "tickInterval" "1000" args
   let largeTickFreq = read $ getArg "largeTickFreq" "10" args
   let timeFormat = getArg "tf" "%Y-%m-%d %H:%M:%OS" args
