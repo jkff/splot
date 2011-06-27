@@ -172,7 +172,8 @@ main = do
   let barHeight = read $ getArg "bh" "5" args
   let tickIntervalMs = read $ getArg "tickInterval" "10" args
   let timeFormat = getArg "tf" "%Y-%m-%d %H:%M:%OS" args
-  let parseTime s = fromMaybe (error $ "Invalid time: " ++ show s) . strptime (B.pack timeFormat) $ s
+  let ptime = strptime (B.pack timeFormat)
+  let parseTime s = fromMaybe (error $ "Invalid time: " ++ show s) . ptime $ s
   let outPNG = getArg "o" "" args
   input <- B.getContents
   let pruneLF b | not (B.null b) && (B.last b == '\r') = B.init b
