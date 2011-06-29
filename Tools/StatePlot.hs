@@ -64,8 +64,10 @@ data RenderConfiguration = RenderConf {
 
 data TickSize = LargeTick | SmallTick
 
-renderEvents :: RenderConfiguration -> IO [Event] -> Renderable ()
-renderEvents conf readEs = Renderable {minsize = return (0,0), render = render' (c $ liftIO readEs)}
+renderEvents :: RenderConfiguration -> IO [Event] -> IO (Renderable ())
+renderEvents conf readEs = if streaming conf 
+                           then return (Renderable {minsize = return (0,0), render = render' (c $ liftIO readEs)})
+                           else readEs >>= \es -> return $ Renderable {minsize = return (0,0), render = render' (return es)}
   where 
     maybeM :: (Monad m) => (a -> m b) -> Maybe a -> m ()
     maybeM f Nothing  = return ()
@@ -295,7 +297,7 @@ main = do
   when (streaming && isNothing toTime)    $ putStrLn "Warning: without -toTime, input will be re-scanned to compute it."
   when (streaming && isNothing forcedNumTracks) $ putStrLn "Warning: without -numTracks, input will be re-scanned to compute it."
 
-  let pic = renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks streaming) readEvents
+  pic <- renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks streaming) readEvents
   case outPNG of
     "" -> renderableToWindow pic w h
     f  -> const () `fmap` renderableToPNGFile pic w h outPNG
