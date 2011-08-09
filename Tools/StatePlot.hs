@@ -97,7 +97,10 @@ renderEvents conf readEs = if streaming conf
         flush = RWS.gets M.keys >>= mapM_ flushTrack
         flushTrack track = do
           (i,ms0) <- RWS.gets (M.! track)
-          flip maybeM ms0 $ \(t0,c0) -> RWS.tell [(i, Bar (time2ms t0) (time2ms maxRenderTime) c0)]
+          flip maybeM ms0 $ \(t0,c0) -> 
+            if (time2ms maxRenderTime - time2ms t0 < expireTimeMs conf)
+              then RWS.tell [(i, Bar        (time2ms t0) (time2ms maxRenderTime)          c0)]
+              else RWS.tell [(i, ExpiredBar (time2ms t0) (time2ms t0 + expireTimeMs conf) c0)]
 
         putTrack track s = modify (M.insert track s)
 
