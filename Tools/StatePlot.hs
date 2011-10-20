@@ -1,6 +1,6 @@
 module Main where
 
-import System (getArgs)
+import System.Environment (getArgs)
 import System.Exit
 
 import Control.Monad.RWS as RWS
