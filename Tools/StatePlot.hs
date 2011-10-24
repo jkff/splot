@@ -23,10 +23,15 @@ import Data.Colour.SRGB
 import Data.Colour.Names
 
 
-data Event = Event {time :: LocalTime, track :: String, edge :: Edge} deriving (Show)
-data Edge = Begin { color :: String } | End { color :: String } deriving (Show)
+import Debug.Trace
 
-data Bar = Bar Double Double String | ExpiredBar Double Double String
+data Event = Event { time :: LocalTime, track :: String, edge :: Edge } deriving (Show)
+data Edge = Begin { color :: String } | End { color :: String } | Pulse { glyph :: Glyph, color :: String } deriving (Show)
+
+-- Text is enough for most purposes (|, o, <, >, ...) but potentially more can exist.
+data Glyph = GlyphText { text :: String } deriving (Show)
+
+data OutputGlyph = Bar Double Double String | ExpiredBar Double Double String | OutPulse Double Glyph String
 
 getArg :: String -> String -> [String] -> String
 getArg name def args = case [(k,v) | (k,v) <- zip args (tail args), k==("-"++name)] of
@@ -37,11 +42,14 @@ parse :: (B.ByteString -> (LocalTime, B.ByteString)) -> B.ByteString -> Event
 parse parseTime s = Event { time = ts, track = B.unpack $ B.tail track', edge = edge }
   where
     (ts, s') = parseTime s
-    (track', color) = B.break (==' ') (B.tail s')
-    clr = if B.null color then "" else B.unpack (B.tail color)
+    (track', arg0) = B.break (==' ') (B.tail s')
+    arg = if B.null arg0 then "" else B.unpack (B.tail arg0)
     edge = case (B.head track') of
-      '>' -> Begin clr
-      '<' -> End clr
+      '>' -> Begin (if null arg then "gray" else arg)
+      '<' -> End   (if null arg then ""     else arg)
+      '!' -> Pulse (GlyphText text) color
+        where (color, text0) = break (==' ') arg
+              text = tail text0
 
 diffToMillis :: LocalTime -> LocalTime -> Double
 diffToMillis t2 t1 = fromIntegral (truncate (1000000*d)) / 1000
@@ -64,8 +72,10 @@ data RenderConfiguration = RenderConf {
 
 data TickSize = LargeTick | SmallTick
 
-renderEvents :: RenderConfiguration -> IO [Event] -> Renderable ()
-renderEvents conf readEs = Renderable {minsize = return (0,0), render = render' (c $ liftIO readEs)}
+renderEvents :: RenderConfiguration -> IO [Event] -> IO (Renderable ())
+renderEvents conf readEs = if streaming conf 
+                           then return (Renderable {minsize = return (0,0), render = renderGlyphsAtFront (c $ liftIO readEs)})
+                           else readEs >>= \es -> return $ Renderable {minsize = return (0,0), render = renderGlyphsAtFront (return es)}
   where 
     maybeM :: (Monad m) => (a -> m b) -> Maybe a -> m ()
     maybeM f Nothing  = return ()
@@ -81,7 +91,7 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = render' 
                 | c >= 'A' && c <= 'Z' = 10 + fromEnum c - fromEnum 'A'
     readColour cs = readColourName cs
 
-    makeBars time2ms minRenderTime maxRenderTime es = snd $ RWS.execRWS (mapM_ step es >> flush) () M.empty
+    makeGlyphs time2ms minRenderTime maxRenderTime es = snd $ RWS.execRWS (mapM_ step es >> flush) () M.empty
       where
         step e@(Event t track edge) = do
           (i, ms0) <- summon e
@@ -90,12 +100,19 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = render' 
             if (time2ms t - time2ms t0 < expireTimeMs conf)
               then RWS.tell [(i, Bar        (time2ms t0) (time2ms t)                      (overrideEnd c0))]
               else RWS.tell [(i, ExpiredBar (time2ms t0) (time2ms t0 + expireTimeMs conf) (overrideEnd c0))]
-          putTrack track (i, case edge of { Begin c -> Just (t,c); End _ -> Nothing })
+          case edge of { 
+            Pulse glyph c -> RWS.tell [(i, OutPulse (time2ms t) glyph c)]
+          ; Begin       c -> putTrack track (i, Just (t,c))
+          ; End         _ -> putTrack track (i, Nothing)
+          }
         
         flush = RWS.gets M.keys >>= mapM_ flushTrack
         flushTrack track = do
           (i,ms0) <- RWS.gets (M.! track)
-          flip maybeM ms0 $ \(t0,c0) -> RWS.tell [(i, Bar (time2ms t0) (time2ms maxRenderTime) c0)]
+          flip maybeM ms0 $ \(t0,c0) -> 
+            if (time2ms maxRenderTime - time2ms t0 < expireTimeMs conf)
+              then RWS.tell [(i, Bar        (time2ms t0) (time2ms maxRenderTime)          c0)]
+              else RWS.tell [(i, ExpiredBar (time2ms t0) (time2ms t0 + expireTimeMs conf) c0)]
 
         putTrack track s = modify (M.insert track s)
 
@@ -110,8 +127,16 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = render' 
               _                         -> return ()
           RWS.gets (M.! track)
 
-    render' :: CRender [Event] -> (Double,Double) -> CRender (PickFn a)
-    render' readEs (w,h) = do
+    renderGlyphsAtFront :: CRender [Event] -> (Double,Double) -> CRender (PickFn a)
+    renderGlyphsAtFront readEs (w,h) = do
+      setFillStyle $ solidFillStyle (opaque white)
+      fillPath $ rectPath $ Rect (Point 0 0) (Point w h)
+      render' readEs (w,h) False
+      render' readEs (w,h) True
+      return nullPickFn
+
+    render' :: CRender [Event] -> (Double,Double) -> Bool -> CRender ()
+    render' readEs (w,h) drawGlyphsNotBars = do
       es <- readEs
       minRenderTime <- case (fromTime conf, streaming conf) of { 
         (Just t, _)      -> return t;
@@ -174,7 +199,7 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = render' 
         ; c $ C.lineTo x2 y2
         ; c $ C.stroke
         }
-      let drawBar i (Bar ms1 ms2 color) = do {
+      let drawGlyph i (Bar ms1 ms2 color) = if drawGlyphsNotBars then return () else do {
             setLineStyle $ solidLine 1 transparent
           ; setFillStyle $ solidFillStyle $ opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color)
           ; case barHeight conf of {
@@ -182,16 +207,21 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = render' 
             ; BarHeightFill     -> fillRectAA (Point (ms2x ms1) (track2y i - yStep/2)) (Point (ms2x ms2) (track2y i + yStep/2))
             }
           }
-          drawBar i (ExpiredBar ms1 ms2 color) = do {
+          drawGlyph i (ExpiredBar ms1 ms2 color) = if drawGlyphsNotBars then return () else do {
             setLineStyle $ dashedLine 1 [3,3] (opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color))
           ; strokeLineAA (Point (ms2x ms1) (track2y i)) (Point (ms2x ms2) (track2y i))
           ; setLineStyle $ solidLine 1 (opaque red)
           ; strokeLineAA (Point (ms2x ms2 - 5) (track2y i - 5)) (Point (ms2x ms2 + 5) (track2y i + 5))
           ; strokeLineAA (Point (ms2x ms2 + 5) (track2y i - 5)) (Point (ms2x ms2 - 5) (track2y i + 5))
           }
+          drawGlyph i (OutPulse ms glyph color) = if not drawGlyphsNotBars then return () else case glyph of {
+            GlyphText text -> do {
+              setLineStyle $ solidLine 1 (opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color))
+            ; moveTo (Point (ms2x ms) (track2y i))
+            ; c $ C.showText text
+            }
+          }
 
-      setFillStyle $ solidFillStyle (opaque white)
-      fillPath $ rectPath $ Rect (Point 0 0) (Point w h)
       setLineStyle $ solidLine 1 (opaque black)
       moveTo (Point 10 (h-20))
       lineTo (Point w  (h-20))
@@ -203,10 +233,10 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = render' 
       c $ C.showText $ "Origin at " ++ show minRenderTime ++ ", 1 small tick = " ++ show (tickIntervalMs conf) ++ "ms"
       mapM_ drawTick ticks
 
-      let bars = makeBars time2ms minRenderTime maxRenderTime es 
-      mapM_ (\(i,e) -> drawBar i e) bars
+      let glyphs = makeGlyphs time2ms minRenderTime maxRenderTime es 
+      mapM_ (\(i,e) -> drawGlyph i e) glyphs
       
-      return nullPickFn
+      return ()
 
 showHelp = mapM_ putStrLn [
     "splot - a tool for visualizing the lifecycle of many concurrent multi-stage processes. See http://www.haskell.org/haskellwiki/Splot",
@@ -252,10 +282,12 @@ showHelp = mapM_ putStrLn [
     "2010-10-21 16:45:09,541 >bar green",
     "2010-10-21 16:45:10,631 >foo yellow",
     "2010-10-21 16:45:10,725 >foo #ff0000",
+    "2010-10-21 16:45:10,836 !foo black Some text",
     "2010-10-21 16:45:10,930 >bar blue",
     "2010-10-21 16:45:11,322 <foo",
     "2010-10-21 16:45:12,508 <bar red",
     "",
+    "'!FOO COLOR TEXT' means 'draw text TEXT with color COLOR on track FOO',",
     "'>FOO COLOR' means 'start a bar of color COLOR on track FOO',",
     "'<FOO' means 'end the current bar for FOO'.",
     "'<FOO COLOR' means 'end the current bar for FOO and make the whole bar of color COLOR'",
@@ -295,7 +327,7 @@ main = do
   when (streaming && isNothing toTime)    $ putStrLn "Warning: without -toTime, input will be re-scanned to compute it."
   when (streaming && isNothing forcedNumTracks) $ putStrLn "Warning: without -numTracks, input will be re-scanned to compute it."
 
-  let pic = renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks streaming) readEvents
+  pic <- renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks streaming) readEvents
   case outPNG of
     "" -> renderableToWindow pic w h
     f  -> const () `fmap` renderableToPNGFile pic w h outPNG
