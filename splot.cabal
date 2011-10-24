@@ -28,6 +28,6 @@ executable splot
     Build-Depends: base < 3
 
   Build-Depends: cairo, bytestring, bytestring-lexing, strptime >= 0.1.7, time, 
-                 containers, colour, Chart, mtl
-  Main-Is: Tools/StatePlot.hs
+                 containers, colour, Chart, mtl, HUnit
+  Main-Is: Tools/SPlotMain.hs
   Ghc-Options: -O2 -rtsopts
