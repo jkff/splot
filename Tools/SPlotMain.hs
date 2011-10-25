@@ -71,13 +71,19 @@ showHelp = mapM_ putStrLn [
     "2010-10-21 16:45:10,930 >bar blue",
     "2010-10-21 16:45:11,322 <foo",
     "2010-10-21 16:45:12,508 <bar red",
+    "2010-10-21 16:45:10,631 >foo some data",
+    "2010-10-21 16:45:10,631 <foo",
     "",
     "'!FOO COLOR TEXT' means 'draw text TEXT with color COLOR on track FOO',",
-    "'>FOO COLOR' means 'start a bar of color COLOR on track FOO',",
+    "'>FOO COLOR' means 'start a bar of color COLOR on track FOO'.", 
     "'<FOO' means 'end the current bar for FOO'.",
     "'<FOO COLOR' means 'end the current bar for FOO and make the whole bar of color COLOR'",
     "(for example if we found that FOO failed and all the work since >FOO was wasted, COLOR",
-    "might be red)"
+    "might be red)",
+    "",
+    "Note that COLOR may be an hexadecimal RGB specification (like '#4B3AF7'), ",
+    " a color name (see SVG 1.1 specifications) or an arbitrary token in which ",
+    " case splot will generate a new color for each different token"
     ]
 
 main = do
