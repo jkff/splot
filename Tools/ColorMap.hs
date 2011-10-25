@@ -1,11 +1,16 @@
-module Tools.ColorMap where
+-- |Color cycling routines. 
+-- This module provide function for maintaining a map from arbitrary strings to colorus and 
+-- generating new colours for unknown names by cycling over the RGB spectrum.
+module Tools.ColorMap (
+  ColorMap,
+  defaultColorMap,
+  cycleColor)
+where
 import Data.Bits
 import Data.Colour
 import Data.Colour.SRGB
 import Data.Colour.Names
 import qualified Data.Map as M
-
-import Debug.Trace
 
 data (Show b, Eq b, Ord b, Floating b) => ColorMap b = ColorMap {
   colorMap :: M.Map String (Colour b), -- ^ Current map from arbitrary strings to colour descriptions
