@@ -47,7 +47,7 @@ readColor ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
     unhex c | c >= '0' && c <= '9' = fromEnum c - fromEnum '0'
             | c >= 'a' && c <= 'z' = fromEnum c - fromEnum 'a'
             | c >= 'A' && c <= 'Z' = 10 + fromEnum c - fromEnum 'A'
-    readColor cs = readColourName cs
+readColor cs = readColourName cs
     
     
 -- | Compute the color associated to a given name, providing an updated map with
