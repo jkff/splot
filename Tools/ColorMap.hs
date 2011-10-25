@@ -1,15 +1,18 @@
 module Tools.ColorMap where
+import Data.Bits
 import Data.Colour
 import Data.Colour.SRGB
 import Data.Colour.Names
 import qualified Data.Map as M
+
+import Debug.Trace
 
 data (Show b, Eq b, Ord b, Floating b) => ColorMap b = ColorMap {
   colorMap :: M.Map String (Colour b), -- ^ Current map from arbitrary strings to colour descriptions
   lastColor :: Colour b                -- ^ Next color for assigning to as yet unknown names
   } deriving (Eq, Show)
   
--- | Starts with empty association and mid-range grey
+-- | Starts with empty names-colors map and mid-range grey
 defaultColorMap = ColorMap M.empty (sRGB24 128 128 128)
 
 -- | Compute the colour associated to a given name, providing an updated map with
@@ -17,21 +20,21 @@ defaultColorMap = ColorMap M.empty (sRGB24 128 128 128)
 cycleColor :: (RealFrac b, Show b, Eq b, Ord b, Floating b) => 
               ColorMap b
               -> String 
-              -> (Maybe (Colour b),ColorMap b)
+              -> (Colour b,ColorMap b)
 cycleColor map name = case M.lookup name (colorMap map) of
-  Just c  -> (Just c, map)
-  Nothing -> (Just (lastColor map), augment map (name,next))
+  Just c  -> (c, map)
+  Nothing -> (lastColor map, augment map (name,next))
   where
-    next = nextColor map
+    next = nextColor (lastColor map)
   
 
-nextColor :: (RealFrac b, Show b, Eq b, Ord b, Floating b) => 
-             ColorMap b -> 
+nextColor :: (RealFrac b, Floating b) => 
+             Colour b -> 
              Colour b
-nextColor (ColorMap _ last) = (sRGB24 (r+17 `mod` 255) (g+19 `mod` 255) (b+23 `mod` 255))
+nextColor last = sRGB24 (r+7) (g+17) (b+23)
   where
     RGB r g b = toSRGB24 last
-  
+    
 augment :: (Show b, Eq b, Ord b, Floating b) => 
              ColorMap b -> 
              (String, Colour b) -> 

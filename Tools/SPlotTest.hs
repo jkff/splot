@@ -13,14 +13,14 @@ import System.Exit
 
 
 colorCyclingTests = TestList [
-  cycleColor defaultColorMap "bar"  ~?= (Just base, colorMap "bar")
-  ,cycleColor (colorMap "foo") "bar" ~?= (Just nextColor, augmentedColorMap "bar")
-  ,cycleColor (colorMap "foo") "baz" ~?= (Just nextColor, augmentedColorMap "baz")
+  cycleColor defaultColorMap "bar"   ~?= (base, colorMap "bar")
+  ,cycleColor (colorMap "foo") "bar" ~?= (nextColor, augmentedColorMap "bar")
+  ,cycleColor (colorMap "foo") "baz" ~?= (nextColor, augmentedColorMap "baz")
   ]
   where
     base                   = (sRGB24 128 128 128)
-    nextColor              = sRGB24 (128+17) (128+19) (128+23)
-    nextNextColor          = sRGB24 (128+17+17) (128+19+19) (128+23+23)
+    nextColor              = sRGB24 (128+7) (128+17) (128+23)
+    nextNextColor          = sRGB24 (128+7+7) (128+17+17) (128+23+23)
     colorsAssoc       name = [(name,(sRGB24 128 128 128))]
     colorMap          name = ColorMap (M.fromList (colorsAssoc name)) nextColor
     augmentedColorMap name = augment (colorMap "foo") (name, nextNextColor)
