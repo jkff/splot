@@ -72,21 +72,6 @@ renderEvents conf readEs = if streaming conf
     maybeM f Nothing  = return ()
     maybeM f (Just x) = f x >> return ()
 
-    computeColour map color = case readColour color of 
-      Nothing -> cycleColor map color
-      Just c  -> (c, map)
-    
-    readColour ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
-      where
-        r = fromIntegral $ unhex r2 + 16*unhex r1
-        g = fromIntegral $ unhex g2 + 16*unhex g1
-        b = fromIntegral $ unhex b2 + 16*unhex b1
-        unhex c | c >= '0' && c <= '9' = fromEnum c - fromEnum '0'
-                | c >= 'a' && c <= 'z' = fromEnum c - fromEnum 'a'
-                | c >= 'A' && c <= 'Z' = 10 + fromEnum c - fromEnum 'A'
-    readColour cs = readColourName cs
-    
-    
     makeGlyphs time2ms minRenderTime maxRenderTime es = snd $ RWS.execRWS (mapM_ step es >> flush) () M.empty
       where
         step e@(Event t track edge) = do
