@@ -18,11 +18,13 @@ import qualified Data.Map as M
 
 data (Show b, Eq b, Ord b, Floating b) => ColorMap b = ColorMap {
   colorMap :: M.Map String (Colour b), -- ^ Current map from arbitrary strings to color descriptions
-  lastColor :: Colour b                -- ^ Next color for assigning to as yet unknown names
+  colorWheel :: [Colour b]             -- ^ Next colors for assigning to as yet unknown names
   } deriving (Eq, Show)
   
 -- | Starts with empty names-colors map and mid-range grey
-defaultColorMap = ColorMap M.empty (sRGB24 128 128 128)
+defaultColorMap = ColorMap M.empty defaultColorWheel
+
+defaultColorWheel = [green, blue, red, brown, orange, magenta, grey, purple, violet, lightblue, crimson, burlywood] ++ map nextColor defaultColorWheel
 
 -- | Compute color for a given name within the associated map.
 -- This function encapsulates the following rules:
@@ -58,9 +60,9 @@ cycleColor :: (RealFrac b, Show b, Eq b, Ord b, Floating b) =>
               -> (Colour b,ColorMap b)
 cycleColor map name = case M.lookup name (colorMap map) of
   Just c  -> (c, map)
-  Nothing -> (lastColor map, augment map (name,next))
+  Nothing -> (next, augment map (name,next) wheel')
   where
-    next = nextColor (lastColor map)
+    (next:wheel') = colorWheel map
   
 
 nextColor :: (RealFrac b, Floating b) => 
@@ -73,6 +75,7 @@ nextColor last = sRGB24 (r+7) (g+17) (b+23)
 augment :: (Show b, Eq b, Ord b, Floating b) => 
              ColorMap b -> 
              (String, Colour b) -> 
+             [Colour b] ->
              ColorMap b
-augment map (name,col) = ColorMap (M.insert name (lastColor map) (colorMap map)) col
+augment map (name,col) wheel = ColorMap (M.insert name col (colorMap map)) wheel
   
