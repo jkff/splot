@@ -182,7 +182,7 @@ renderEvents conf readEs = if streaming conf
         }
       let drawGlyph i (Bar ms1 ms2 color) map = if drawGlyphsNotBars then return map else do {
             setLineStyle $ solidLine 1 transparent
-          ; let (colorToUse,map') = computeColour map color
+          ; let (colorToUse,map') = computeColor map color
           ; setFillStyle $ solidFillStyle $ opaque $ colorToUse
           ; case barHeight conf of {
               BarHeightFixed bh -> fillRectAA (Point (ms2x ms1) (track2y i - bh   /2)) (Point (ms2x ms2) (track2y i + bh   /2))
@@ -191,7 +191,7 @@ renderEvents conf readEs = if streaming conf
           ; return map'
           }
           drawGlyph i (ExpiredBar ms1 ms2 color) map = if drawGlyphsNotBars then return map else do {
-            let (colorToUse,map') = computeColour map color
+            let (colorToUse,map') = computeColor map color
           ; setLineStyle $ dashedLine 1 [3,3] (opaque $ colorToUse)
           ; strokeLineAA (Point (ms2x ms1) (track2y i)) (Point (ms2x ms2) (track2y i))
           ; setLineStyle $ solidLine 1 (opaque red)
@@ -201,7 +201,7 @@ renderEvents conf readEs = if streaming conf
           }
           drawGlyph i (OutPulse ms glyph color) map = if not drawGlyphsNotBars then return map else case glyph of {
             GlyphText text -> do {
-              let (colorToUse,map') = computeColour map color
+              let (colorToUse,map') = computeColor map color
             ; setLineStyle $ solidLine 1 (opaque $ colorToUse)
             ; moveTo (Point (ms2x ms) (track2y i))
             ; c $ C.showText text

@@ -1,11 +1,14 @@
 -- |Color cycling routines. 
--- This module provide function for maintaining a map from arbitrary strings to colorus and 
--- generating new colours for unknown names by cycling over the RGB spectrum.
+-- This module provides functions for maintaining a map from arbitrary strings to colors and 
+-- generating new colors for unknown names by cycling over the RGB spectrum.
+-- 
+-- P.S. We use the spelling "color" in our identifiers for no particular reason 
+-- other than internal consistency.
 module Tools.ColorMap (
   ColorMap,
   defaultColorMap,
   cycleColor,
-  computeColour)
+  computeColor)
 where
 import Data.Bits
 import Data.Colour
@@ -14,7 +17,7 @@ import Data.Colour.Names
 import qualified Data.Map as M
 
 data (Show b, Eq b, Ord b, Floating b) => ColorMap b = ColorMap {
-  colorMap :: M.Map String (Colour b), -- ^ Current map from arbitrary strings to colour descriptions
+  colorMap :: M.Map String (Colour b), -- ^ Current map from arbitrary strings to color descriptions
   lastColor :: Colour b                -- ^ Next color for assigning to as yet unknown names
   } deriving (Eq, Show)
   
@@ -32,11 +35,11 @@ defaultColorMap = ColorMap M.empty (sRGB24 128 128 128)
 --
 --  * Otherwise, the @color@ name is looked up in the @map@ and if it is not found, a new color is generated
 --    using a simple cycling function.
-computeColour map color = case readColour color of 
+computeColor map color = case readColor color of 
   Nothing -> cycleColor map color
   Just c  -> (c, map)
     
-readColour ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
+readColor ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
   where
     r = fromIntegral $ unhex r2 + 16*unhex r1
     g = fromIntegral $ unhex g2 + 16*unhex g1
@@ -44,11 +47,11 @@ readColour ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
     unhex c | c >= '0' && c <= '9' = fromEnum c - fromEnum '0'
             | c >= 'a' && c <= 'z' = fromEnum c - fromEnum 'a'
             | c >= 'A' && c <= 'Z' = 10 + fromEnum c - fromEnum 'A'
-    readColour cs = readColourName cs
+    readColor cs = readColourName cs
     
     
--- | Compute the colour associated to a given name, providing an updated map with
--- possibly new colours in the cycle.
+-- | Compute the color associated to a given name, providing an updated map with
+-- possibly new colors in the cycle.
 cycleColor :: (RealFrac b, Show b, Eq b, Ord b, Floating b) => 
               ColorMap b
               -> String 
