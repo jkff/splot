@@ -72,6 +72,10 @@ renderEvents conf readEs = if streaming conf
     maybeM f Nothing  = return ()
     maybeM f (Just x) = f x >> return ()
 
+    computeColour map color = case readColour color of 
+      Nothing -> cycleColor map color
+      Just c  -> (c, map)
+    
     readColour ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
       where
         r = fromIntegral $ unhex r2 + 16*unhex r1
@@ -81,7 +85,8 @@ renderEvents conf readEs = if streaming conf
                 | c >= 'a' && c <= 'z' = fromEnum c - fromEnum 'a'
                 | c >= 'A' && c <= 'Z' = 10 + fromEnum c - fromEnum 'A'
     readColour cs = readColourName cs
-
+    
+    
     makeGlyphs time2ms minRenderTime maxRenderTime es = snd $ RWS.execRWS (mapM_ step es >> flush) () M.empty
       where
         step e@(Event t track edge) = do
@@ -190,26 +195,32 @@ renderEvents conf readEs = if streaming conf
         ; c $ C.lineTo x2 y2
         ; c $ C.stroke
         }
-      let drawGlyph i (Bar ms1 ms2 color) = if drawGlyphsNotBars then return () else do {
+      let drawGlyph i (Bar ms1 ms2 color) map = if drawGlyphsNotBars then return map else do {
             setLineStyle $ solidLine 1 transparent
-          ; setFillStyle $ solidFillStyle $ opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color)
+          ; let (colorToUse,map') = computeColour map color
+          ; setFillStyle $ solidFillStyle $ opaque $ colorToUse
           ; case barHeight conf of {
               BarHeightFixed bh -> fillRectAA (Point (ms2x ms1) (track2y i - bh   /2)) (Point (ms2x ms2) (track2y i + bh   /2))
             ; BarHeightFill     -> fillRectAA (Point (ms2x ms1) (track2y i - yStep/2)) (Point (ms2x ms2) (track2y i + yStep/2))
             }
+          ; return map'
           }
-          drawGlyph i (ExpiredBar ms1 ms2 color) = if drawGlyphsNotBars then return () else do {
-            setLineStyle $ dashedLine 1 [3,3] (opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color))
+          drawGlyph i (ExpiredBar ms1 ms2 color) map = if drawGlyphsNotBars then return map else do {
+            let (colorToUse,map') = computeColour map color
+          ; setLineStyle $ dashedLine 1 [3,3] (opaque $ colorToUse)
           ; strokeLineAA (Point (ms2x ms1) (track2y i)) (Point (ms2x ms2) (track2y i))
           ; setLineStyle $ solidLine 1 (opaque red)
           ; strokeLineAA (Point (ms2x ms2 - 5) (track2y i - 5)) (Point (ms2x ms2 + 5) (track2y i + 5))
           ; strokeLineAA (Point (ms2x ms2 + 5) (track2y i - 5)) (Point (ms2x ms2 - 5) (track2y i + 5))
+          ; return map'
           }
-          drawGlyph i (OutPulse ms glyph color) = if not drawGlyphsNotBars then return () else case glyph of {
+          drawGlyph i (OutPulse ms glyph color) map = if not drawGlyphsNotBars then return map else case glyph of {
             GlyphText text -> do {
-              setLineStyle $ solidLine 1 (opaque $ fromMaybe (error $ "unknown color: " ++ color) (readColour color))
+              let (colorToUse,map') = computeColour map color
+            ; setLineStyle $ solidLine 1 (opaque $ colorToUse)
             ; moveTo (Point (ms2x ms) (track2y i))
             ; c $ C.showText text
+            ; return map'
             }
           }
 
@@ -225,6 +236,7 @@ renderEvents conf readEs = if streaming conf
       mapM_ drawTick ticks
 
       let glyphs = makeGlyphs time2ms minRenderTime maxRenderTime es 
-      mapM_ (\(i,e) -> drawGlyph i e) glyphs
+      let colorMap = defaultColorMap
+      foldM (\map (i,e) -> drawGlyph i e map) colorMap glyphs
       
       return ()
