@@ -14,10 +14,11 @@ import Data.Bits
 import Data.Colour
 import Data.Colour.SRGB
 import Data.Colour.Names
+import qualified Data.ByteString.Char8 as S
 import qualified Data.Map as M
 
 data (Show b, Eq b, Ord b, Floating b) => ColorMap b = ColorMap {
-  colorMap :: M.Map String (Colour b), -- ^ Current map from arbitrary strings to color descriptions
+  colorMap :: M.Map S.ByteString (Colour b), -- ^ Current map from arbitrary strings to color descriptions
   colorWheel :: [Colour b]             -- ^ Next colors for assigning to as yet unknown names
   } deriving (Eq, Show)
   
@@ -41,7 +42,9 @@ computeColor map color = case readColor color of
   Nothing -> cycleColor map color
   Just c  -> (c, map)
     
-readColor ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
+readColor = readColor' . S.unpack
+
+readColor' ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
   where
     r = fromIntegral $ unhex r2 + 16*unhex r1
     g = fromIntegral $ unhex g2 + 16*unhex g1
@@ -49,14 +52,14 @@ readColor ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
     unhex c | c >= '0' && c <= '9' = fromEnum c - fromEnum '0'
             | c >= 'a' && c <= 'z' = fromEnum c - fromEnum 'a'
             | c >= 'A' && c <= 'Z' = 10 + fromEnum c - fromEnum 'A'
-readColor cs = readColourName cs
+readColor' cs = readColourName cs
     
     
 -- | Compute the color associated to a given name, providing an updated map with
 -- possibly new colors in the cycle.
 cycleColor :: (RealFrac b, Show b, Eq b, Ord b, Floating b) => 
               ColorMap b
-              -> String 
+              -> S.ByteString 
               -> (Colour b,ColorMap b)
 cycleColor map name = case M.lookup name (colorMap map) of
   Just c  -> (c, map)
@@ -74,7 +77,7 @@ nextColor last = sRGB24 (r+7) (g+17) (b+23)
     
 augment :: (Show b, Eq b, Ord b, Floating b) => 
              ColorMap b -> 
-             (String, Colour b) -> 
+             (S.ByteString, Colour b) -> 
              [Colour b] ->
              ColorMap b
 augment map (name,col) wheel = ColorMap (M.insert name col (colorMap map)) wheel

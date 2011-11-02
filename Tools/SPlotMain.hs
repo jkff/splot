@@ -12,9 +12,10 @@ import Graphics.Rendering.Chart.Renderable(renderableToPNGFile)
 import Data.Maybe(fromMaybe,isNothing)
 import Data.Ord(comparing)
 
-import Control.Monad.RWS as RWS
-
+import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as B
+
+import Control.Monad (when)
 
 import Tools.StatePlot
 
@@ -105,9 +106,9 @@ main = do
   let inputFile = getArg "if" "-" args
   let pruneLF b | not (B.null b) && (B.last b == '\r') = B.init b
                 | otherwise                            = b
-  let cmpTracks = case getArg "sort" "time"  args of { "time" -> comparing time ; "name" -> comparing track }
+  let cmpTracks = case getArg "sort" "time"  args of { "time" -> comparing utcTime ; "name" -> comparing track }
   let expireTimeMs = read $ getArg "expire" "Infinity" args
-  let phantomColor = case getArg "phantom" "" args of { "" -> Nothing; c -> Just c }
+  let phantomColor = case getArg "phantom" "" args of { "" -> Nothing; c -> Just (S.pack c) }
   let streaming = case getArg "stream" "false" args of { "true" -> True; _ -> False }
 
   let readInput = if inputFile == "-" then B.getContents else B.readFile inputFile
