@@ -115,9 +115,8 @@ main = do
   let readEvents = (map (parse parseTime . pruneLF) . B.lines) `fmap` readInput
   
   when (streaming && (inputFile == "-"))  $ error "In streaming mode (-stream true) you MUST use an actual filename in '-if'"
-  when (streaming && isNothing fromTime)  $ putStrLn "Warning: without -fromTime, input will be re-scanned to compute it."
-  when (streaming && isNothing toTime)    $ putStrLn "Warning: without -toTime, input will be re-scanned to compute it."
-  when (streaming && isNothing forcedNumTracks) $ putStrLn "Warning: without -numTracks, input will be re-scanned to compute it."
+  when (streaming && (isNothing fromTime || isNothing toTime || isNothing forcedNumTracks)) $ do
+    putStrLn "Warning: without all of -fromTime, -toTime, -numTracks, input will be scanned an extra time"
 
   pic <- renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks streaming) readEvents
   case outPNG of

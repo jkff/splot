@@ -24,13 +24,15 @@ import Tools.ColorMap
 
 import Debug.Trace
 
-data Event = Event { localTime :: LocalTime, utcTime :: UTCTime, track :: S.ByteString, edge :: Edge } deriving (Show)
-data Edge = Begin { color :: S.ByteString } | End { color :: S.ByteString } | Pulse { glyph :: Glyph, color :: S.ByteString } deriving (Show)
+data Event = Event { localTime :: !LocalTime, utcTime :: !UTCTime, track :: !S.ByteString, edge :: !Edge } deriving (Show)
+data Edge = Begin { color :: !S.ByteString } | End { color :: !S.ByteString } | Pulse { glyph :: !Glyph, color :: !S.ByteString } deriving (Show)
 
 -- Text is enough for most purposes (|, o, <, >, ...) but potentially more can exist.
-data Glyph = GlyphText { text :: S.ByteString } deriving (Show)
+data Glyph = GlyphText { text :: !S.ByteString } deriving (Show)
 
-data OutputGlyph = Bar Double Double S.ByteString | ExpiredBar Double Double S.ByteString | OutPulse Double Glyph S.ByteString deriving (Show)
+data OutputGlyph = Bar {-# UNPACK #-} !Double !Double !S.ByteString 
+                 | ExpiredBar {-# UNPACK #-} !Double !Double !S.ByteString 
+                 | OutPulse {-# UNPACK #-} !Double !Glyph !S.ByteString deriving (Show)
 
 parse :: (B.ByteString -> (LocalTime, B.ByteString)) -> B.ByteString -> Event
 parse parseTime s = Event { localTime = ts, utcTime = localTimeToUTC utc ts, track = repack $ B.tail track', edge = edge }
@@ -88,31 +90,33 @@ renderEvents conf readEs = if streaming conf
     maybeM f Nothing  = return ()
     maybeM f (Just x) = f x >> return ()
 
-    genGlyphs :: (UTCTime -> Double) -> Double -> [Event] -> Bool -> ((Int,OutputGlyph) -> RenderState (ColorMap Double) ()) -> RenderState (ColorMap Double) ()
-    genGlyphs time2ms rangeMs es drawGlyphsNotBars withGlyph = genGlyphs' es M.empty
+    -- Returns: whether we have any non-bars glyphs (text)
+    genGlyphs :: (UTCTime -> Double) -> Double -> [Event] -> Bool -> (Int -> OutputGlyph -> RenderState s ()) -> RenderState s Bool
+    genGlyphs time2ms !rangeMs es drawGlyphsNotBars withGlyph = genGlyphs' es M.empty False
       where
-        genGlyphs' [] m = if drawGlyphsNotBars then return () else mapM_ flushTrack (M.toList m)
+        genGlyphs' [] m !havePulses = when (not drawGlyphsNotBars) (mapM_ flushTrack (M.toList m)) >> return havePulses
           where
             flushTrack (track, (i, Nothing)) = return ()
             flushTrack (track, (i, Just (mst0,c0))) = do
               if (rangeMs - mst0 < expireTimeMs conf)
-                then withGlyph (i, Bar        mst0 rangeMs                    c0)
-                else withGlyph (i, ExpiredBar mst0 (mst0 + expireTimeMs conf) c0)
-        genGlyphs' ((e@(Event _ t track edge)):es) m = do
+                then withGlyph i (Bar        mst0 rangeMs                    c0)
+                else withGlyph i (ExpiredBar mst0 (mst0 + expireTimeMs conf) c0)
+        genGlyphs' ((e@(Event _ t track edge)):es) m !havePulses = do
           let mst = time2ms t
           ((i,ms0), m') <- summon e mst m
+          let isPulse = case edge of {Pulse{} -> True; _ -> False}
           if drawGlyphsNotBars 
             then do
-              case edge of {Pulse glyph c -> withGlyph (i, OutPulse mst glyph c); _ -> return ()}
-              genGlyphs' es m'
+              case edge of {Pulse glyph c -> withGlyph i (OutPulse mst glyph c); _ -> return ()}
+              genGlyphs' es m' (havePulses || isPulse)
             else do
               flip maybeM ms0 $ \(mst0,c0) -> do
                 let overrideEnd c0 = case edge of { End c | not (S.null c) -> c; _ -> c0 }
                 if (mst - mst0 < expireTimeMs conf)
-                  then withGlyph (i, Bar        mst0 mst                        (overrideEnd c0))
-                  else withGlyph (i, ExpiredBar mst0 (mst0 + expireTimeMs conf) (overrideEnd c0))
+                  then withGlyph i (Bar        mst0 mst                        (overrideEnd c0))
+                  else withGlyph i (ExpiredBar mst0 (mst0 + expireTimeMs conf) (overrideEnd c0))
               let m'' = M.insert track (i, case edge of { Begin c -> Just (mst,c); End _ -> Nothing }) m'
-              genGlyphs' es m''
+              genGlyphs' es m'' (havePulses || isPulse)
         
         summon (Event _ t track edge) mst m = case M.lookup track m of
           Just x  -> return (x, m)
@@ -120,8 +124,8 @@ renderEvents conf readEs = if streaming conf
             let i = M.size m
             let m' = M.insert track (i, Nothing) m
             when (not drawGlyphsNotBars) $ case (phantomColor conf, edge) of
-              (_,      End c) | not (S.null c) -> withGlyph (i, Bar 0 mst c)
-              (Just c, End _)                  -> withGlyph (i, Bar 0 mst c)
+              (_,      End c) | not (S.null c) -> withGlyph i (Bar 0 mst c)
+              (Just c, End _)                  -> withGlyph i (Bar 0 mst c)
               _                                -> return ()
             return ((i,Nothing), m')
 
@@ -129,37 +133,36 @@ renderEvents conf readEs = if streaming conf
     renderGlyphsAtFront readEs (w,h) = do
       setFillStyle $ solidFillStyle (opaque white)
       fillPath $ rectPath $ Rect (Point 0 0) (Point w h)
-      render' readEs (w,h) False
-      render' readEs (w,h) True
+      haveGlyphs <- render' readEs (w,h) False
+      when haveGlyphs $ (render' readEs (w,h) True >> return ())
       return nullPickFn
 
-    render' :: CRender [Event] -> (Double,Double) -> Bool -> CRender ()
+    computeTimesTracks es = (a, b, M.size m)
+      where
+        (Just a, Just b, m) = foldl' f (Nothing, Nothing, M.empty) es
+        f (!minRT, !maxRT, !tracks) e = (orJust min minRT (localTime e), orJust max maxRT (localTime e), M.insert (track e) () tracks)
+        orJust f Nothing   x = Just x
+        orJust f (Just x0) x = Just (f x0 x)
+
+    override (ft, tt, nt) = (override' ft (fromTime conf), override' tt (toTime conf), override' nt (forcedNumTracks conf))
+    override' x (Just y) = y
+    override' x Nothing  = x
+
+    render' :: CRender [Event] -> (Double,Double) -> Bool -> CRender Bool
     render' readEs (w,h) drawGlyphsNotBars = do
       es <- readEs
-      minRenderLocalTime <- case (fromTime conf, streaming conf) of { 
-        (Just t, _)      -> return t;
-        (Nothing, True)  -> fmap (minimum . map localTime) readEs; 
-        (Nothing, False) -> return . minimum . map localTime $ es -- Will evaluate the whole of 'es' and hold it in memory
-      } 
-      let minRenderTime = localTimeToUTC utc minRenderLocalTime
-      maxRenderTime <- case (toTime conf,   streaming conf) of { 
-        (Just t, _)      -> return (localTimeToUTC utc t);
-        (Nothing, True)  -> fmap (maximum . map utcTime) readEs; 
-        (Nothing, False) -> return . maximum . map utcTime $ es -- Same here.
-      } 
 
+      (minRenderLocalTime, maxRenderLocalTime, numTracks) <- case (fromTime conf, toTime conf, forcedNumTracks conf, streaming conf) of
+        (Just a, Just b, Just c, _) -> return (a, b, c)
+        (_, _, _, True)             -> fmap (override . computeTimesTracks) readEs
+        (_, _, _, False)            -> return $ override (computeTimesTracks es) -- Will evaluate the whole of 'es' and hold it in memory
+
+      let (minRenderTime, maxRenderTime) = (localTimeToUTC utc minRenderLocalTime, localTimeToUTC utc maxRenderLocalTime)
       let rangeMs = diffToMillis maxRenderTime minRenderTime
 
       let time2ms t | t < minRenderTime = 0
                     | t > maxRenderTime = rangeMs
                     | otherwise         = diffToMillis t minRenderTime
-
-      let numUnique xs = M.size $ M.fromList $ zip xs (repeat ())
-      numTracks <- case (forcedNumTracks conf, streaming conf) of { 
-        (Just n, _)      -> return n;
-        (Nothing, True)  -> fmap (numUnique . map track) readEs;
-        (Nothing, False) -> return . numUnique . map track $ es
-      }
 
       let ticks = takeWhile ((<rangeMs).snd) $ 
             map (\i -> if i`mod`largeTickFreq conf == 0 
@@ -181,10 +184,10 @@ renderEvents conf readEs = if streaming conf
         ; C.stroke
         }
          
-      let fillRect   x1 y1 x2 y2 = c $ C.rectangle x1 y1 (x2-x1) (y2-y1) >> C.fill
-      let strokeLine x1 y1 x2 y2 = c $ C.moveTo x1 y1 >> C.lineTo x2 y2 >> C.stroke
+      let fillRect   !x1 !y1 !x2 !y2 = C.rectangle x1 y1 (x2-x1) (y2-y1) >> C.fill
+      let strokeLine !x1 !y1 !x2 !y2 = C.moveTo x1 y1 >> C.lineTo x2 y2 >> C.stroke
 
-      let getColor :: S.ByteString -> RenderState (ColorMap Double) (Colour Double)
+      let getColor :: S.ByteString -> RenderState (ColorMap Double) (RGB Double)
           getColor c = do {
             map <- ST.get
           ; let (color, map') = computeColor map c
@@ -195,8 +198,8 @@ renderEvents conf readEs = if streaming conf
       let drawGlyph :: Int -> OutputGlyph -> RenderState (ColorMap Double) ()
           drawGlyph !i (Bar !ms1 !ms2 !color)
             | drawGlyphsNotBars = return () 
-            | otherwise = getColor color >>= \colorToUse -> liftR $ do {
-            c $ setSourceColor (opaque colorToUse)
+            | otherwise = getColor color >>= \(RGB r g b) -> liftR $ c $ do {
+            C.setSourceRGB r g b
           ; let y = track2y i
           ; case barHeight conf of {
               BarHeightFixed bh -> fillRect (ms2x ms1) (y - bh   /2) (ms2x ms2) (y + bh   /2)
@@ -206,20 +209,20 @@ renderEvents conf readEs = if streaming conf
           }
           drawGlyph i (ExpiredBar ms1 ms2 color) 
             | drawGlyphsNotBars = return ()
-            | otherwise = getColor color >>= \colorToUse -> liftR $ do {
-            setLineStyle $ dashedLine 1 [3,3] (opaque $ colorToUse)
+            | otherwise = getColor color >>= \(RGB r g b) -> liftR $ do {
+            setLineStyle $ dashedLine 1 [3,3] (opaque $ sRGB r g b)
           ; let y = track2y i
-          ; strokeLine (ms2x ms1) y (ms2x ms2) y
+          ; c $ strokeLine (ms2x ms1) y (ms2x ms2) y
           ; setLineStyle $ solidLine 1 (opaque red)
-          ; strokeLine (ms2x ms2 - 5) (y - 5) (ms2x ms2 + 5) (y + 5)
-          ; strokeLine (ms2x ms2 + 5) (y - 5) (ms2x ms2 - 5) (y + 5)
+          ; c $ strokeLine (ms2x ms2 - 5) (y - 5) (ms2x ms2 + 5) (y + 5)
+          ; c $ strokeLine (ms2x ms2 + 5) (y - 5) (ms2x ms2 - 5) (y + 5)
           ; return ()
           }
           drawGlyph i (OutPulse ms glyph color) 
             | not drawGlyphsNotBars = return () 
-            | otherwise = getColor color >>= \colorToUse -> liftR $ case glyph of {
+            | otherwise = getColor color >>= \(RGB r g b) -> liftR $ case glyph of {
             GlyphText text -> do {
-              setLineStyle $ solidLine 1 (opaque $ colorToUse)
+              setLineStyle $ solidLine 1 (opaque $ sRGB r g b)
             ; let y = track2y i
             ; moveTo (Point (ms2x ms) y)
             ; c $ C.showText (S.unpack text)
@@ -240,4 +243,4 @@ renderEvents conf readEs = if streaming conf
       mapM_ drawTick ticks
 
       let colorMap = defaultColorMap
-      evalStateT (runRenderState $ genGlyphs time2ms rangeMs es drawGlyphsNotBars (uncurry drawGlyph)) defaultColorMap
+      evalStateT (runRenderState $ genGlyphs time2ms rangeMs es drawGlyphsNotBars drawGlyph) defaultColorMap

@@ -18,14 +18,14 @@ import qualified Data.ByteString.Char8 as S
 import qualified Data.Map as M
 
 data (Show b, Eq b, Ord b, Floating b) => ColorMap b = ColorMap {
-  colorMap :: M.Map S.ByteString (Colour b), -- ^ Current map from arbitrary strings to color descriptions
-  colorWheel :: [Colour b]             -- ^ Next colors for assigning to as yet unknown names
+  colorMap :: M.Map S.ByteString (RGB b), -- ^ Current map from arbitrary strings to color descriptions
+  colorWheel :: [RGB b]             -- ^ Next colors for assigning to as yet unknown names
   } deriving (Eq, Show)
   
 -- | Starts with empty names-colors map and mid-range grey
 defaultColorMap = ColorMap M.empty defaultColorWheel
 
-defaultColorWheel = [green, blue, red, brown, orange, magenta, grey, purple, violet, lightblue, crimson, burlywood] ++ map nextColor defaultColorWheel
+defaultColorWheel = map toSRGB [green, blue, red, brown, orange, magenta, grey, purple, violet, lightblue, crimson, burlywood] ++ map nextColor defaultColorWheel
 
 -- | Compute color for a given name within the associated map.
 -- This function encapsulates the following rules:
@@ -44,7 +44,7 @@ computeColor map color = case readColor color of
     
 readColor = readColor' . S.unpack
 
-readColor' ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
+readColor' ('#':r1:r2:g1:g2:b1:b2:[]) = Just (RGB r g b)
   where
     r = fromIntegral $ unhex r2 + 16*unhex r1
     g = fromIntegral $ unhex g2 + 16*unhex g1
@@ -52,7 +52,7 @@ readColor' ('#':r1:r2:g1:g2:b1:b2:[]) = Just (sRGB24 r g b)
     unhex c | c >= '0' && c <= '9' = fromEnum c - fromEnum '0'
             | c >= 'a' && c <= 'z' = fromEnum c - fromEnum 'a'
             | c >= 'A' && c <= 'Z' = 10 + fromEnum c - fromEnum 'A'
-readColor' cs = readColourName cs
+readColor' cs = toSRGB `fmap` readColourName cs
     
     
 -- | Compute the color associated to a given name, providing an updated map with
@@ -60,7 +60,7 @@ readColor' cs = readColourName cs
 cycleColor :: (RealFrac b, Show b, Eq b, Ord b, Floating b) => 
               ColorMap b
               -> S.ByteString 
-              -> (Colour b,ColorMap b)
+              -> (RGB b,ColorMap b)
 cycleColor map name = case M.lookup name (colorMap map) of
   Just c  -> (c, map)
   Nothing -> (next, augment map (name,next) wheel')
@@ -69,16 +69,14 @@ cycleColor map name = case M.lookup name (colorMap map) of
   
 
 nextColor :: (RealFrac b, Floating b) => 
-             Colour b -> 
-             Colour b
-nextColor last = sRGB24 (r+7) (g+17) (b+23)
-  where
-    RGB r g b = toSRGB24 last
+             RGB b -> 
+             RGB b
+nextColor (RGB r g b) = RGB (r+7) (g+17) (b+23)
     
 augment :: (Show b, Eq b, Ord b, Floating b) => 
              ColorMap b -> 
-             (S.ByteString, Colour b) -> 
-             [Colour b] ->
+             (S.ByteString, RGB b) -> 
+             [RGB b] ->
              ColorMap b
 augment map (name,col) wheel = ColorMap (M.insert name col (colorMap map)) wheel
   
