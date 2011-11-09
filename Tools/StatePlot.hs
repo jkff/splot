@@ -104,19 +104,22 @@ renderEvents conf readEs = if streaming conf
         genGlyphs' ((e@(Event _ t track edge)):es) m !havePulses = do
           let mst = time2ms t
           ((i,ms0), m') <- summon e mst m
-          let isPulse = case edge of {Pulse{} -> True; _ -> False}
-          if drawGlyphsNotBars 
-            then do
-              case edge of {Pulse glyph c -> withGlyph i (OutPulse mst glyph c); _ -> return ()}
-              genGlyphs' es m' (havePulses || isPulse)
-            else do
+          case (drawGlyphsNotBars, edge) of
+            (True, Pulse glyph color) -> do
+              withGlyph i (OutPulse mst glyph color)
+              genGlyphs' es m' True
+            (True, _) -> do
+              genGlyphs' es m' havePulses
+            (False, Pulse glyph color) -> do
+              genGlyphs' es m' True
+            (False, _) -> do
               flip maybeM ms0 $ \(mst0,c0) -> do
                 let overrideEnd c0 = case edge of { End c | not (S.null c) -> c; _ -> c0 }
                 if (mst - mst0 < expireTimeMs conf)
                   then withGlyph i (Bar        mst0 mst                        (overrideEnd c0))
                   else withGlyph i (ExpiredBar mst0 (mst0 + expireTimeMs conf) (overrideEnd c0))
               let m'' = M.insert track (i, case edge of { Begin c -> Just (mst,c); End _ -> Nothing }) m'
-              genGlyphs' es m'' (havePulses || isPulse)
+              genGlyphs' es m'' havePulses
         
         summon (Event _ t track edge) mst m = case M.lookup track m of
           Just x  -> return (x, m)
