@@ -145,7 +145,7 @@ renderEvents conf readEs = if streaming conf
         (Just a, Just b, m) = foldl' f (Nothing, Nothing, M.empty) es
         f (!minRT, !maxRT, !tracks) e = (orJust min minRT (localTime e), orJust max maxRT (localTime e), M.insert (track e) () tracks)
         orJust f Nothing   x = Just x
-        orJust f (Just x0) x = Just (f x0 x)
+        orJust f (Just !x0) x = Just (f x0 x)
 
     override (ft, tt, nt) = (override' ft (fromTime conf), override' tt (toTime conf), override' nt (forcedNumTracks conf))
     override' x (Just y) = y
