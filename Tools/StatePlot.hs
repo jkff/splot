@@ -70,7 +70,8 @@ data RenderConfiguration = RenderConf {
         fromTime :: Maybe LocalTime,
         toTime :: Maybe LocalTime,
         forcedNumTracks :: Maybe Int,
-        streaming :: Bool
+        streaming :: Bool,
+        colorWheels :: [(S.ByteString, [S.ByteString])]
     }
 
 data TickSize = LargeTick | SmallTick
@@ -190,7 +191,7 @@ renderEvents conf readEs = if streaming conf
       let fillRect   !x1 !y1 !x2 !y2 = C.rectangle x1 y1 (x2-x1) (y2-y1) >> C.fill
       let strokeLine !x1 !y1 !x2 !y2 = C.moveTo x1 y1 >> C.lineTo x2 y2 >> C.stroke
 
-      let getColor :: S.ByteString -> RenderState (ColorMap Double) (RGB Double)
+      let getColor :: S.ByteString -> RenderState ColorMap (RGB Double)
           getColor c = do {
             map <- ST.get
           ; let (color, map') = computeColor map c
@@ -198,7 +199,7 @@ renderEvents conf readEs = if streaming conf
           ; return color
           }
 
-      let drawGlyph :: Int -> OutputGlyph -> RenderState (ColorMap Double) ()
+      let drawGlyph :: Int -> OutputGlyph -> RenderState ColorMap ()
           drawGlyph !i (Bar !ms1 !ms2 !color)
             | drawGlyphsNotBars = return () 
             | otherwise = getColor color >>= \(RGB r g b) -> liftR $ c $ do {
@@ -245,5 +246,5 @@ renderEvents conf readEs = if streaming conf
       setLineStyle $ solidLine 1 (opaque black)
       mapM_ drawTick ticks
 
-      let colorMap = defaultColorMap
-      evalStateT (runRenderState $ genGlyphs time2ms rangeMs es drawGlyphsNotBars drawGlyph) defaultColorMap
+      let colorMap = prepareColorMap (colorWheels conf)
+      evalStateT (runRenderState $ genGlyphs time2ms rangeMs es drawGlyphsNotBars drawGlyph) colorMap

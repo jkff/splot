@@ -6,7 +6,7 @@
 -- other than internal consistency.
 module Tools.ColorMap (
   ColorMap,
-  defaultColorMap,
+  prepareColorMap,
   cycleColor,
   computeColor)
 where
@@ -14,16 +14,26 @@ import Data.Bits
 import Data.Colour
 import Data.Colour.SRGB
 import Data.Colour.Names
+import Data.Maybe
 import qualified Data.ByteString.Char8 as S
 import qualified Data.Map as M
 
-data (Show b, Eq b, Ord b, Floating b) => ColorMap b = ColorMap {
-  colorMap :: M.Map S.ByteString (RGB b), -- ^ Current map from arbitrary strings to color descriptions
-  colorWheel :: [RGB b]             -- ^ Next colors for assigning to as yet unknown names
+
+data ColorMap = ColorMap {
+  colorMaps :: M.Map S.ByteString ColorMap1 -- ^ Color scheme id -> Color map
+}
+
+data ColorMap1 = ColorMap1 {
+  colorMap :: M.Map S.ByteString (RGB Double), -- ^ Current map from arbitrary strings to color descriptions
+  colorWheel :: [RGB Double]             -- ^ Next colors for assigning to as yet unknown names
   } deriving (Eq, Show)
   
+prepareColorMap :: [(S.ByteString, [S.ByteString])] -> ColorMap
+prepareColorMap ms = ColorMap $ M.fromList $ (S.pack "", defaultColorMap):
+  [(scheme, ColorMap1 M.empty $ cycle $ map (fromJust . readColor) colorNames) | (scheme, colorNames) <- ms]
+
 -- | Starts with empty names-colors map and mid-range grey
-defaultColorMap = ColorMap M.empty defaultColorWheel
+defaultColorMap = ColorMap1 M.empty defaultColorWheel
 
 defaultColorWheel = map toSRGB [green, blue, red, brown, orange, magenta, grey, purple, violet, lightblue, crimson, burlywood] ++ map nextColor defaultColorWheel
 
@@ -55,28 +65,33 @@ readColor' ('#':r1:r2:g1:g2:b1:b2:[]) = Just (RGB r g b)
 readColor' cs = toSRGB `fmap` readColourName cs
     
     
+cycleColor :: ColorMap
+              -> S.ByteString 
+              -> (RGB Double,ColorMap)
+cycleColor (ColorMap map) name = case M.lookup scheme map of
+    Nothing -> cycleColor (ColorMap map) S.empty -- Use default color scheme then.
+    Just m  -> let (res, m') = cycleColor1 m subColor in (res, ColorMap $ M.insert scheme m' map)
+  where
+    (scheme, subColor) = case S.uncons name of
+      -- /scheme/color
+      Just ('/', name') -> S.break (=='/') name'
+      _                 -> (S.empty, name)
+
 -- | Compute the color associated to a given name, providing an updated map with
 -- possibly new colors in the cycle.
-cycleColor :: (RealFrac b, Show b, Eq b, Ord b, Floating b) => 
-              ColorMap b
+cycleColor1 :: ColorMap1
               -> S.ByteString 
-              -> (RGB b,ColorMap b)
-cycleColor map name = case M.lookup name (colorMap map) of
+              -> (RGB Double, ColorMap1)
+cycleColor1 map name = case M.lookup name (colorMap map) of
   Just c  -> (c, map)
   Nothing -> (next, augment map (name,next) wheel')
   where
     (next:wheel') = colorWheel map
   
 
-nextColor :: (RealFrac b, Floating b) => 
-             RGB b -> 
-             RGB b
+nextColor :: RGB Double -> RGB Double
 nextColor (RGB r g b) = RGB (r+7) (g+17) (b+23)
     
-augment :: (Show b, Eq b, Ord b, Floating b) => 
-             ColorMap b -> 
-             (S.ByteString, RGB b) -> 
-             [RGB b] ->
-             ColorMap b
-augment map (name,col) wheel = ColorMap (M.insert name col (colorMap map)) wheel
+augment :: ColorMap1 -> (S.ByteString, RGB Double) -> [RGB Double] -> ColorMap1
+augment map (name,col) wheel = ColorMap1 (M.insert name col (colorMap map)) wheel
   

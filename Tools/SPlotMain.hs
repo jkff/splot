@@ -12,6 +12,8 @@ import Graphics.Rendering.Chart.Renderable(renderableToPNGFile)
 import Data.Maybe(fromMaybe,isNothing)
 import Data.Ord(comparing)
 
+import Data.List (tails)
+
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as B
 
@@ -30,7 +32,7 @@ showHelp = mapM_ putStrLn [
     "             [-tf TIMEFORMAT] [-sort SORT] [-expire EXPIRE]",
     "             [-fromTime TIME] [-toTime TIME] [-numTracks NUMTRACKS]",
     "             [-tickInterval TICKINTERVAL] [-largeTickFreq N]",
-    "             [-stream true]",
+    "             [-stream true] [-colorscheme SCHEME COLORS]...",
     "  -if INFILE    - filename from where to read the trace.",
     "                  If omitted or '-', read from stdin.",
     "  -o PNGFILE    - filename to which the output will be written in PNG format.",
@@ -62,12 +64,18 @@ showHelp = mapM_ putStrLn [
     "                  Note that you better also indicate -fromTime, -toTime and -numTracks,",
     "                  otherwise the data will be re-scanned once per each of these properties",
     "                  that is not indicated.",
+    "  -colorscheme SCHEME COLORS - declare a color scheme (see note about colors at the end).",
+    "                  SCHEME is an arbitrary string, e.g.: 'pale' or 'bright'.",
+    "                  COLORS is a space-separated list of colors in SVG or hex, e.g. ",
+    "                  'red green #0000FF'. You may specify multiple -colorscheme arguments.",
     "",
     "Input is read from stdin. Example input (speaks for itself):",
     "2010-10-21 16:45:09,431 >foo green",
     "2010-10-21 16:45:09,541 >bar green",
     "2010-10-21 16:45:10,631 >foo yellow",
     "2010-10-21 16:45:10,725 >foo #ff0000",
+    "2010-10-21 16:45:10,755 >foo /pale/THREAD25",
+    "2010-10-21 16:45:10,775 >bar /bright/THREAD37",
     "2010-10-21 16:45:10,836 !foo black Some text",
     "2010-10-21 16:45:10,930 >bar blue",
     "2010-10-21 16:45:11,322 <foo",
@@ -84,7 +92,18 @@ showHelp = mapM_ putStrLn [
     "",
     "Note that COLOR may be an hexadecimal RGB specification (like '#4B3AF7'), ",
     " a color name (see SVG 1.1 specifications) or an arbitrary token in which ",
-    " case splot will generate a new color for each different token"
+    " case splot will generate a new color for each different token.",
+    "COLOR may also have the form '/SCHEME/TOKEN', in which case the colors for ",
+    " tokens are cycled within colors specified by --colorscheme for SCHEME.",
+    "For example, if you have two types of threads in your program and you want them", 
+    " to be colored differently but do not want to assign colors to each thread ",
+    " individually, you can use colors named like /pale/THREADID and /bright/THREADID",
+    " and specify --colorscheme bright 'red green blue orange yellow' --colorscheme pale ",
+    " 'lightgray lightblue pink'.",
+    "If you use an unspecified color scheme, or don't specify a color scheme at all, ",
+    " the tool resorts to using a default scheme, which consists of a sequence of",
+    " contrast and bright colors.",
+    "" 
     ]
 
 main = do
@@ -114,11 +133,13 @@ main = do
   let readInput = if inputFile == "-" then B.getContents else B.readFile inputFile
   let readEvents = (map (parse parseTime . pruneLF) . B.lines) `fmap` readInput
   
+  let colorMaps = [(S.pack scheme, map S.pack (words wheel)) | ("-colorscheme":scheme:wheel:_) <- tails args ] 
+
   when (streaming && (inputFile == "-"))  $ error "In streaming mode (-stream true) you MUST use an actual filename in '-if'"
   when (streaming && (isNothing fromTime || isNothing toTime || isNothing forcedNumTracks)) $ do
     putStrLn "Warning: without all of -fromTime, -toTime, -numTracks, input will be scanned an extra time"
 
-  pic <- renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks streaming) readEvents
+  pic <- renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks streaming colorMaps) readEvents
   case outPNG of
     "" -> renderableToWindow pic w h
     f  -> const () `fmap` renderableToPNGFile pic w h outPNG
