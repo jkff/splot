@@ -6,7 +6,6 @@ import System.Exit
 import Data.Time
 import Data.Time.Parse
 
-import Graphics.Rendering.Chart.Gtk(renderableToWindow)
 import Graphics.Rendering.Chart.Renderable(renderableToPNGFile)
 
 import Data.Maybe(fromMaybe,isNothing)
@@ -35,8 +34,7 @@ showHelp = mapM_ putStrLn [
     "             [-stream true] [-colorscheme SCHEME COLORS]...",
     "  -if INFILE    - filename from where to read the trace.",
     "                  If omitted or '-', read from stdin.",
-    "  -o PNGFILE    - filename to which the output will be written in PNG format.",
-    "                  If omitted, it will be shown in a window.",
+    "  -o PNGFILE    - filename to which the output will be written in PNG format. Required.",
     "  -w, -h        - width and height of the resulting picture. Default 640x480.",
     "  -bh           - height of the bar depicting each individual process. Default 5 pixels.",
     "                  Use 1 or so, or 'fill' if you have a lot of them. ",
@@ -140,7 +138,5 @@ main = do
     putStrLn "Warning: without all of -fromTime, -toTime, -numTracks, input will be scanned an extra time"
 
   pic <- renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks streaming colorMaps) readEvents
-  case outPNG of
-    "" -> renderableToWindow pic w h
-    f  -> const () `fmap` renderableToPNGFile pic w h outPNG
+  renderableToPNGFile pic w h outPNG
 
