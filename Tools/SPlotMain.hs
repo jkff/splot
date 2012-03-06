@@ -56,12 +56,6 @@ showHelp = mapM_ putStrLn [
     "  -fromTime TIME - clip picture on left (time in same format as in trace)",
     "  -toTime TIME   - clip picture on right (time in same format as in trace)",
     "  -numTracks NUMTRACKS - explicitly specify number of tracks when using '-stream true'",
-    "  -stream true  - use 'streaming mode' where the input is not loaded into memory and you",
-    "                  can process multi-gigabyte inputs.",
-    "                  In this mode, you MUST use an actual filename in '-if'.",
-    "                  Note that you better also indicate -fromTime, -toTime and -numTracks,",
-    "                  otherwise the data will be re-scanned once per each of these properties",
-    "                  that is not indicated.",
     "  -colorscheme SCHEME COLORS - declare a color scheme (see note about colors at the end).",
     "                  SCHEME is an arbitrary string, e.g.: 'pale' or 'bright'.",
     "                  COLORS is a space-separated list of colors in SVG or hex, e.g. ",
@@ -126,17 +120,12 @@ main = do
   let cmpTracks = case getArg "sort" "time"  args of { "time" -> comparing utcTime ; "name" -> comparing track }
   let expireTimeMs = read $ getArg "expire" "Infinity" args
   let phantomColor = case getArg "phantom" "" args of { "" -> Nothing; c -> Just (S.pack c) }
-  let streaming = case getArg "stream" "false" args of { "true" -> True; _ -> False }
 
   let readInput = if inputFile == "-" then B.getContents else B.readFile inputFile
   let readEvents = (map (parse parseTime . pruneLF) . B.lines) `fmap` readInput
   
   let colorMaps = [(S.pack scheme, map S.pack (words wheel)) | ("-colorscheme":scheme:wheel:_) <- tails args ] 
 
-  when (streaming && (inputFile == "-"))  $ error "In streaming mode (-stream true) you MUST use an actual filename in '-if'"
-  when (streaming && (isNothing fromTime || isNothing toTime || isNothing forcedNumTracks)) $ do
-    putStrLn "Warning: without all of -fromTime, -toTime, -numTracks, input will be scanned an extra time"
-
-  pic <- renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks streaming colorMaps) readEvents
+  pic <- renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs cmpTracks phantomColor fromTime toTime forcedNumTracks True colorMaps) readEvents
   renderableToPNGFile pic w h outPNG
 
