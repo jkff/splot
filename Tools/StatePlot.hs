@@ -65,12 +65,10 @@ data RenderConfiguration = RenderConf {
         tickIntervalMs :: Double,
         largeTickFreq :: Int,
         expireTimeMs :: Double,
-        cmpTracks :: Event -> Event -> Ordering,
         phantomColor :: Maybe S.ByteString,
         fromTime :: Maybe LocalTime,
         toTime :: Maybe LocalTime,
         forcedNumTracks :: Maybe Int,
-        streaming :: Bool,
         colorWheels :: [(S.ByteString, [S.ByteString])]
     }
 
@@ -81,10 +79,8 @@ newtype RenderState s a = RenderState { runRenderState :: StateT s CRender a } d
 liftR :: CRender () -> RenderState s ()
 liftR r = RenderState $ lift r
 
-renderEvents :: RenderConfiguration -> IO [Event] -> IO (Renderable ())
-renderEvents conf readEs = if streaming conf 
-                           then return (Renderable {minsize = return (0,0), render = renderGlyphsAtFront (c $ liftIO readEs)})
-                           else readEs >>= \es -> return $ Renderable {minsize = return (0,0), render = renderGlyphsAtFront (return es)}
+renderEvents :: RenderConfiguration -> IO [Event] -> Renderable ()
+renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGlyphsAtFront (c $ liftIO readEs)}
   where 
     {-# INLINE maybeM #-}
     maybeM :: (Monad m) => (a -> m b) -> Maybe a -> m ()
@@ -156,10 +152,9 @@ renderEvents conf readEs = if streaming conf
     render' readEs (w,h) drawGlyphsNotBars = do
       es <- readEs
 
-      (minRenderLocalTime, maxRenderLocalTime, numTracks) <- case (fromTime conf, toTime conf, forcedNumTracks conf, streaming conf) of
-        (Just a, Just b, Just c, _) -> return (a, b, c)
-        (_, _, _, True)             -> fmap (override . computeTimesTracks) readEs
-        (_, _, _, False)            -> return $ override (computeTimesTracks es) -- Will evaluate the whole of 'es' and hold it in memory
+      (minRenderLocalTime, maxRenderLocalTime, numTracks) <- case (fromTime conf, toTime conf, forcedNumTracks conf) of
+        (Just a, Just b, Just c) -> return (a, b, c)
+        (_, _, _)                -> fmap (override . computeTimesTracks) readEs
 
       let (minRenderTime, maxRenderTime) = (localTimeToUTC utc minRenderLocalTime, localTimeToUTC utc maxRenderLocalTime)
       let rangeMs = diffToMillis maxRenderTime minRenderTime
@@ -183,8 +178,8 @@ renderEvents conf readEs = if streaming conf
         ; BarHeightFill     -> fromIntegral (i+1) * yStep - yStep/2
         }
       let drawTick (t, ms) = c $ do {
-          C.moveTo (ms2x ms) (h-20)
-        ; C.lineTo (ms2x ms) (h-case t of { LargeTick -> 13 ; SmallTick -> 17 })
+          C.moveTo (ms2x ms + 1) (h-20)
+        ; C.lineTo (ms2x ms + 1) (h-case t of { LargeTick -> 13 ; SmallTick -> 17 })
         ; C.stroke
         }
          
@@ -234,17 +229,27 @@ renderEvents conf readEs = if streaming conf
             }
           }
 
-      setLineStyle $ solidLine 1 (opaque black)
-      moveTo (Point 10 (h-20))
-      lineTo (Point w  (h-20))
-      c $ C.stroke
-      moveTo (Point 10 (h-20))
-      lineTo (Point 10 0)
-      c $ C.stroke
-      moveTo (Point 10 (h-3))
-      c $ C.showText $ "Origin at " ++ show minRenderLocalTime ++ ", 1 small tick = " ++ show (tickIntervalMs conf) ++ "ms"
-      setLineStyle $ solidLine 1 (opaque black)
-      mapM_ drawTick ticks
+      when (not drawGlyphsNotBars) $ do
+        c $ C.setAntialias C.AntialiasNone
+        setLineStyle $ solidLine 1 (opaque black)
+        
+        -- Until a bug in Chart is resolved: http://hackage.haskell.org/packages/archive/Chart/0.13.1/doc/html/src/Graphics-Rendering-Chart-Types.html
+        -- setLineStyle for a solid line doesn't clear dashes because it doesn't call setDash if line_dashes_ ls is [] (???)
+        c $ C.setDash [] 0
 
+        moveTo (Point 10 (h-20))
+        lineTo (Point w  (h-20))
+        c $ C.stroke
+        moveTo (Point 10 (h-20))
+        lineTo (Point 10 0)
+        c $ C.stroke
+        mapM_ drawTick ticks
+        moveTo (Point 10 (h-3))
+        c $ C.setAntialias C.AntialiasGray
+        c $ C.setFontSize 12
+        c $ C.showText $ "Origin at " ++ show minRenderLocalTime ++ ", 1 small tick = " ++ show (tickIntervalMs conf) ++ "ms"
+
+      c $ C.setAntialias C.AntialiasSubpixel
       let colorMap = prepareColorMap (colorWheels conf)
       evalStateT (runRenderState $ genGlyphs time2ms rangeMs es drawGlyphsNotBars drawGlyph) colorMap
+
