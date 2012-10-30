@@ -21,6 +21,7 @@ import Data.List (tails)
 
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as B
+import Data.ByteString.Lex.Lazy.Double
 
 import Control.Monad (when)
 
@@ -50,7 +51,10 @@ showHelp = mapM_ putStrLn [
     "  -tf           - time format, as in http://linux.die.net/man/3/strptime but with ",
     "                  fractional seconds supported via %OS - will parse 12.4039 or 12,4039",
     "                  Also, %^[+-][N]s will parse seconds since the epoch, for example ",
-    "                  %^-3s are milliseconds since the epoch (N can only be 1 digit)",
+    "                  %^-3s are milliseconds since the epoch (N can only be 1 digit).",
+    "                  Or: -tf elapsed, in which case times are fractional seconds elapsed",
+    "                  since an unknown point in time.",
+    "                  Default: %Y-%m-%d %H:%M:%OS.",
     "  -tickInterval - ticks on the X axis will be this often (in millis, default 1000).",
     "  -largeTickFreq N - every N'th tick will be larger than the others (default 10).",
     "  -expire       - expire activities after given time period (in millis) - for instance,",
@@ -111,6 +115,8 @@ showGitVersion = $(do
     Just (hash,True)  -> hash ++ " (with local modifications)"
     Just (hash,False) -> hash)
 
+addSeconds d t = utcToLocalTime utc (addUTCTime (fromRational $ toRational d) (localTimeToUTC utc t))
+
 main = do
   args <- getArgs
   when (null args || args == ["--help"]) $ showHelp >> exitSuccess
@@ -122,10 +128,16 @@ main = do
   let tickIntervalMs = read $ getArg "tickInterval" "1000" args
   let largeTickFreq = read $ getArg "largeTickFreq" "10" args
   let timeFormat = getArg "tf" "%Y-%m-%d %H:%M:%OS" args
-  let ptime = strptime (B.pack timeFormat)
+  let Just (ourBaseTime,_) = strptime "%Y-%m-%d %H:%M:%OS" "1900-01-01 00:00:00" 
+  let ourStrptime = if timeFormat == "elapsed" 
+                    then \s -> do
+                      (d, s') <- readDouble s
+                      return (addSeconds d ourBaseTime, s')
+                    else strptime (B.pack timeFormat)
+  let ptime = ourStrptime
   let parseTime s = fromMaybe (error $ "Invalid time: " ++ show s) . ptime $ s
-  let fromTime = fst `fmap` (strptime timeFormat $ getArg "fromTime" "" args)
-  let toTime = fst `fmap` (strptime timeFormat $ getArg "toTime" "" args)
+  let fromTime = fst `fmap` (ptime $ B.pack $ getArg "fromTime" "" args)
+  let toTime = fst `fmap` (ptime $ B.pack $ getArg "toTime" "" args)
   let forcedNumTracks = case getArg "numTracks" "" args of { "" -> Nothing ; n -> Just $ read n }
   let outPNG = getArg "o" "" args
   let inputFile = getArg "if" (error "Input file not specified") args
