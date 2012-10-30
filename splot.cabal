@@ -1,5 +1,5 @@
 Name: splot
-Version: 0.3.3
+Version: 0.3.4
 License: BSD3
 License-file: LICENSE
 Copyright: Eugene Kirpichov, 2010
@@ -28,7 +28,7 @@ executable splot
     Build-Depends: base < 3
 
   Build-Depends: cairo, bytestring, bytestring-lexing, strptime >= 0.1.7, time, 
-                 containers, colour, Chart, mtl, HUnit
+                 containers, colour, Chart, mtl, HUnit, template-haskell, vcs-revision
   Other-Modules: Tools.ColorMap Tools.SPlotTest Tools.SPlotTest Tools.StatePlot
   Main-Is: Tools/SPlotMain.hs
   Ghc-Options: -O2 -rtsopts
