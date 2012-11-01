@@ -39,6 +39,7 @@ showHelp = mapM_ putStrLn [
     "             [-tf TIMEFORMAT] [-expire EXPIRE]",
     "             [-fromTime TIME] [-toTime TIME] [-numTracks NUMTRACKS]",
     "             [-tickInterval TICKINTERVAL] [-largeTickFreq N]",
+    "             [-legendWidth WIDTH]",
     "             [-colorscheme SCHEME COLORS]...",
     "  --help        - show help",
     "  --version     - show version",
@@ -66,6 +67,8 @@ showHelp = mapM_ putStrLn [
     "  -fromTime TIME - clip picture on left (time in same format as in trace)",
     "  -toTime TIME   - clip picture on right (time in same format as in trace)",
     "  -numTracks NUMTRACKS - explicitly specify number of tracks for better performance on very large data",
+    "  -legendWidth WIDTH - allocate WIDTH pixels to the left of the plot area to a legend.",
+    "                  Default: 0 (no legend)",
     "  -colorscheme SCHEME COLORS - declare a color scheme (see note about colors at the end).",
     "                  SCHEME is an arbitrary string, e.g.: 'pale' or 'bright'.",
     "                  COLORS is a space-separated list of colors in SVG or hex, e.g. ",
@@ -145,12 +148,13 @@ main = do
                 | otherwise                            = b
   let expireTimeMs = read $ getArg "expire" "Infinity" args
   let phantomColor = case getArg "phantom" "" args of { "" -> Nothing; c -> Just (S.pack c) }
+  let legendWidth = case getArg "legendWidth" "0" args of { "0" -> Nothing; n -> Just (read n) }
 
   let readInput = if inputFile == "-" then B.getContents else B.readFile inputFile
   let readEvents = (map (parse parseTime . pruneLF) . B.lines) `fmap` readInput
   
   let colorMaps = [(S.pack scheme, map S.pack (words wheel)) | ("-colorscheme":scheme:wheel:_) <- tails args ] 
 
-  let pic = renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs phantomColor fromTime toTime forcedNumTracks colorMaps) readEvents
+  let pic = renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs phantomColor fromTime toTime forcedNumTracks colorMaps legendWidth) readEvents
   renderableToPNGFile pic w h outPNG
 
