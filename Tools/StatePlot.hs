@@ -174,7 +174,7 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
                        else (SmallTick, fromIntegral i*tickIntervalMs conf)) [0..]
 
       let legendW = case legendWidth conf of { Just w -> fromIntegral w; Nothing -> 0 }
-      let ms2x ms = legendW + 10 + ms / rangeMs * (w - 10)
+      let ms2x ms = legendW + 10 + ms / rangeMs * (w - 10 - legendW)
       let yStep = case barHeight conf of {
           BarHeightFixed _ -> (h-20) / fromIntegral (numTracks+1)
         ; BarHeightFill    -> (h-20) / fromIntegral numTracks
