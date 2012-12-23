@@ -19,6 +19,7 @@ import qualified Graphics.Rendering.Cairo as C
 import Data.Colour
 import Data.Colour.SRGB
 import Data.Colour.Names
+import Data.Char (isSpace)
 
 import Tools.ColorMap
 
@@ -39,13 +40,14 @@ parse parseTime s = Event { localTime = ts, utcTime = localTimeToUTC utc ts, tra
   where
     (ts, s') = parseTime s
     (track', arg0) = B.break (==' ') (B.tail s')
-    arg = if B.null arg0 then S.empty else repack (B.tail arg0)
+    arg = if B.null arg0 then S.empty else trim $ repack (B.tail arg0)
     edge = case (B.head track') of
       '>' -> Begin (if S.null arg then grayStr else arg)
       '<' -> End   (if S.null arg then S.empty else arg)
       '!' -> Pulse (GlyphText text) color
         where (color, text0) = S.break (==' ') arg
               text = S.tail text0
+    trim = fst . S.spanEnd isSpace
 
 repack = S.concat . B.toChunks
 
