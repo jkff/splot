@@ -19,10 +19,9 @@ import qualified Graphics.Rendering.Cairo as C
 import Data.Colour
 import Data.Colour.SRGB
 import Data.Colour.Names
+import Data.Char (isSpace)
 
 import Tools.ColorMap
-
-import Debug.Trace
 
 data Event = Event { localTime :: !LocalTime, utcTime :: !UTCTime, track :: !S.ByteString, edge :: !Edge } deriving (Show)
 data Edge = Begin { color :: !S.ByteString } | End { color :: !S.ByteString } | Pulse { glyph :: !Glyph, color :: !S.ByteString } deriving (Show)
@@ -39,13 +38,14 @@ parse parseTime s = Event { localTime = ts, utcTime = localTimeToUTC utc ts, tra
   where
     (ts, s') = parseTime s
     (track', arg0) = B.break (==' ') (B.tail s')
-    arg = if B.null arg0 then S.empty else repack (B.tail arg0)
+    arg = if B.null arg0 then S.empty else trim $ repack (B.tail arg0)
     edge = case (B.head track') of
       '>' -> Begin (if S.null arg then grayStr else arg)
       '<' -> End   (if S.null arg then S.empty else arg)
       '!' -> Pulse (GlyphText text) color
         where (color, text0) = S.break (==' ') arg
               text = S.tail text0
+    trim = fst . S.spanEnd isSpace
 
 repack = S.concat . B.toChunks
 
@@ -69,7 +69,8 @@ data RenderConfiguration = RenderConf {
         fromTime :: Maybe LocalTime,
         toTime :: Maybe LocalTime,
         forcedNumTracks :: Maybe Int,
-        colorWheels :: [(S.ByteString, [S.ByteString])]
+        colorWheels :: [(S.ByteString, [S.ByteString])],
+        legendWidth :: Maybe Int
     }
 
 data TickSize = LargeTick | SmallTick
@@ -88,8 +89,11 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
     maybeM f (Just x) = f x >> return ()
 
     -- Returns: whether we have any non-bars glyphs (text)
-    genGlyphs :: (UTCTime -> Double) -> Double -> [Event] -> Bool -> (Int -> OutputGlyph -> RenderState s ()) -> RenderState s Bool
-    genGlyphs time2ms !rangeMs es drawGlyphsNotBars withGlyph = genGlyphs' es M.empty False
+    genGlyphs :: (UTCTime -> Double) -> Double -> [Event] -> Bool 
+                 -> (Int -> OutputGlyph -> RenderState s ())  -- Glyph
+                 -> (Int -> S.ByteString -> RenderState s ()) -- Legend item
+                 -> RenderState s Bool
+    genGlyphs time2ms !rangeMs es drawGlyphsNotBars withGlyph withLegend = genGlyphs' es M.empty False
       where
         genGlyphs' [] m !havePulses = when (not drawGlyphsNotBars) (mapM_ flushTrack (M.toList m)) >> return havePulses
           where
@@ -123,6 +127,7 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
           Nothing -> do
             let i = M.size m
             let m' = M.insert track (i, Nothing) m
+            withLegend i track
             when (not drawGlyphsNotBars) $ case (phantomColor conf, edge) of
               (_,      End c) | not (S.null c) -> withGlyph i (Bar 0 mst c)
               (Just c, End _)                  -> withGlyph i (Bar 0 mst c)
@@ -168,7 +173,8 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
                        then (LargeTick, fromIntegral i*tickIntervalMs conf) 
                        else (SmallTick, fromIntegral i*tickIntervalMs conf)) [0..]
 
-      let ms2x ms = 10 + ms / rangeMs * (w - 10)
+      let legendW = case legendWidth conf of { Just w -> fromIntegral w; Nothing -> 0 }
+      let ms2x ms = legendW + 10 + ms / rangeMs * (w - 10 - legendW)
       let yStep = case barHeight conf of {
           BarHeightFixed _ -> (h-20) / fromIntegral (numTracks+1)
         ; BarHeightFill    -> (h-20) / fromIntegral numTracks
@@ -229,6 +235,18 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
             }
           }
 
+      let drawLegendItem :: Int -> S.ByteString -> RenderState ColorMap ()
+          drawLegendItem !i !s = liftR $ case legendWidth conf of { 
+            Nothing -> return ()
+          ; Just w -> do {
+                setLineStyle $ solidLine 1 (opaque black)
+              ; let y = track2y i
+              ; C.TextExtents xbear ybear tw th _ _ <- c $ C.textExtents (S.unpack s)
+              ; moveTo (Point (fromIntegral w - tw - xbear - 5) (y - th/2 - ybear))
+              ; c $ C.showText (S.unpack s)
+              }
+          }
+
       when (not drawGlyphsNotBars) $ do
         c $ C.setAntialias C.AntialiasNone
         setLineStyle $ solidLine 1 (opaque black)
@@ -237,19 +255,19 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
         -- setLineStyle for a solid line doesn't clear dashes because it doesn't call setDash if line_dashes_ ls is [] (???)
         c $ C.setDash [] 0
 
-        moveTo (Point 10 (h-20))
-        lineTo (Point w  (h-20))
+        moveTo (Point (legendW+10) (h-20))
+        lineTo (Point w            (h-20))
         c $ C.stroke
-        moveTo (Point 10 (h-20))
-        lineTo (Point 10 0)
+        moveTo (Point (legendW+10) (h-20))
+        lineTo (Point (legendW+10) 0)
         c $ C.stroke
         mapM_ drawTick ticks
-        moveTo (Point 10 (h-3))
+        moveTo (Point (legendW+10) (h-3))
         c $ C.setAntialias C.AntialiasGray
         c $ C.setFontSize 12
         c $ C.showText $ "Origin at " ++ show minRenderLocalTime ++ ", 1 small tick = " ++ show (tickIntervalMs conf) ++ "ms"
 
       c $ C.setAntialias C.AntialiasSubpixel
       let colorMap = prepareColorMap (colorWheels conf)
-      evalStateT (runRenderState $ genGlyphs time2ms rangeMs es drawGlyphsNotBars drawGlyph) colorMap
+      evalStateT (runRenderState $ genGlyphs time2ms rangeMs es drawGlyphsNotBars drawGlyph drawLegendItem) colorMap
 
