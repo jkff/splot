@@ -18,7 +18,6 @@ import Data.Maybe
 import qualified Data.ByteString.Char8 as S
 import qualified Data.Map as M
 
-
 data ColorMap = ColorMap {
   colorMaps :: M.Map S.ByteString ColorMap1 -- ^ Color scheme id -> Color map
 }
@@ -40,7 +39,7 @@ defaultColorWheel = map toSRGB [green, blue, red, brown, orange, magenta, grey, 
 -- | Compute color for a given name within the associated map.
 -- This function encapsulates the following rules:
 -- 
---  * If @color@ is a 6-digit hexadecimal value of the form '#FA34B7' then this is used as aan immediate
+--  * If @color@ is a 6-digit hexadecimal value of the form '#FA34B7' then this is used as an immediate
 --    RGB color,
 --
 --  * If @color@ is a color name from SVG1.1 specification (http://www.w3.org/TR/SVG11/types.html#ColorKeywords)
@@ -60,7 +59,7 @@ readColor' ('#':r1:r2:g1:g2:b1:b2:[]) = Just (RGB r g b)
     g = fromIntegral $ unhex g2 + 16*unhex g1
     b = fromIntegral $ unhex b2 + 16*unhex b1
     unhex c | c >= '0' && c <= '9' = fromEnum c - fromEnum '0'
-            | c >= 'a' && c <= 'z' = fromEnum c - fromEnum 'a'
+            | c >= 'a' && c <= 'z' = 10 + fromEnum c - fromEnum 'a'
             | c >= 'A' && c <= 'Z' = 10 + fromEnum c - fromEnum 'A'
 readColor' cs = toSRGB `fmap` readColourName cs
     

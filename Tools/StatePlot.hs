@@ -23,8 +23,6 @@ import Data.Char (isSpace)
 
 import Tools.ColorMap
 
-import Debug.Trace
-
 data Event = Event { localTime :: !LocalTime, utcTime :: !UTCTime, track :: !S.ByteString, edge :: !Edge } deriving (Show)
 data Edge = Begin { color :: !S.ByteString } | End { color :: !S.ByteString } | Pulse { glyph :: !Glyph, color :: !S.ByteString } deriving (Show)
 
