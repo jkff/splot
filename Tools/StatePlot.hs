@@ -13,6 +13,7 @@ import Data.Time.Parse
 
 import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.ByteString.Char8 as S
+import Data.ByteString.Lex.Double
 import Graphics.Rendering.Chart
 import qualified Graphics.Rendering.Cairo.Internal as CI
 import qualified Graphics.Rendering.Cairo as C
@@ -24,7 +25,12 @@ import Data.Char (isSpace)
 import Tools.ColorMap
 
 data Event = Event { localTime :: !LocalTime, utcTime :: !UTCTime, track :: !S.ByteString, edge :: !Edge } deriving (Show)
-data Edge = Begin { color :: !S.ByteString } | End { color :: !S.ByteString } | Pulse { glyph :: !Glyph, color :: !S.ByteString } deriving (Show)
+data Event' = Event' { msTime :: !Double, track' :: !S.ByteString, edge' :: !Edge } deriving (Show)
+data Edge = Begin { color :: !S.ByteString }
+          | End { color :: !S.ByteString }
+          | Both { duration :: Double, color :: !S.ByteString }
+          | Pulse { glyph :: !Glyph, color :: !S.ByteString }
+          deriving (Show)
 
 -- Text is enough for most purposes (|, o, <, >, ...) but potentially more can exist.
 data Glyph = GlyphText { text :: !S.ByteString } deriving (Show)
@@ -42,6 +48,10 @@ parse parseTime s = Event { localTime = ts, utcTime = localTimeToUTC utc ts, tra
     edge = case (B.head track') of
       '>' -> Begin (if S.null arg then grayStr else arg)
       '<' -> End   (if S.null arg then S.empty else arg)
+      '=' -> Both  duration color
+        where (durationS, color0) = S.break (==' ') arg
+              color = S.tail color0
+              Just (duration, _) = readDouble durationS
       '!' -> Pulse (GlyphText text) color
         where (color, text0) = S.break (==' ') arg
               text = S.tail text0
@@ -93,8 +103,9 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
                  -> (Int -> OutputGlyph -> RenderState s ())  -- Glyph
                  -> (Int -> S.ByteString -> RenderState s ()) -- Legend item
                  -> RenderState s Bool
-    genGlyphs time2ms !rangeMs es drawGlyphsNotBars withGlyph withLegend = genGlyphs' es M.empty False
+    genGlyphs time2ms !rangeMs es drawGlyphsNotBars withGlyph withLegend = genGlyphs' (map parseTime es) M.empty False
       where
+        parseTime (Event _ t track edge) = Event' (time2ms t) track edge
         genGlyphs' [] m !havePulses = when (not drawGlyphsNotBars) (mapM_ flushTrack (M.toList m)) >> return havePulses
           where
             flushTrack (track, (i, Nothing)) = return ()
@@ -102,8 +113,7 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
               if (rangeMs - mst0 < expireTimeMs conf)
                 then withGlyph i (Bar        mst0 rangeMs                    c0)
                 else withGlyph i (ExpiredBar mst0 (mst0 + expireTimeMs conf) c0)
-        genGlyphs' ((e@(Event _ t track edge)):es) m !havePulses = do
-          let mst = time2ms t
+        genGlyphs' ((e@(Event' mst track edge)):es) m !havePulses = do
           ((i,ms0), m') <- summon e mst m
           case (drawGlyphsNotBars, edge) of
             (True, Pulse glyph color) -> do
@@ -113,6 +123,14 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
               genGlyphs' es m' havePulses
             (False, Pulse glyph color) -> do
               genGlyphs' es m' True
+            (False, Both duration color) -> do
+              let (start, end) = if (duration > 0)
+                                 then (mst, mst + duration)
+                                 else (mst + duration, mst)
+              let eStart = Event' start track (Begin color)
+              let eEnd   = Event' end   track (End S.empty)
+              let eRestart = case ms0 of { Just (_, c0) -> [Event' end track (Begin c0)]; _ -> [] }
+              genGlyphs' ([eStart,eEnd] ++ eRestart ++ es) m havePulses
             (False, _) -> do
               flip maybeM ms0 $ \(mst0,c0) -> do
                 let overrideEnd c0 = case edge of { End c | not (S.null c) -> c; _ -> c0 }
@@ -122,7 +140,7 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
               let m'' = M.insert track (i, case edge of { Begin c -> Just (mst,c); End _ -> Nothing }) m'
               genGlyphs' es m'' havePulses
         
-        summon (Event _ t track edge) mst m = case M.lookup track m of
+        summon (Event' t track edge) mst m = case M.lookup track m of
           Just x  -> return (x, m)
           Nothing -> do
             let i = M.size m
