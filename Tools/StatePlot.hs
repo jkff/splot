@@ -110,9 +110,13 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
           where
             flushTrack (track, (i, Nothing)) = return ()
             flushTrack (track, (i, Just (mst0,c0))) = do
-              if (rangeMs - mst0 < expireTimeMs conf)
-                then withGlyph i (Bar        mst0 rangeMs                    c0)
-                else withGlyph i (ExpiredBar mst0 (mst0 + expireTimeMs conf) c0)
+              if ((expireTimeMs conf > 0 && rangeMs - mst0 >= expireTimeMs conf) ||
+                  expireTimeMs conf == 0)
+                then withGlyph i (ExpiredBar mst0 (if expireTimeMs conf == 0
+                                                   then rangeMs
+                                                  else (mst0 + expireTimeMs conf))
+                                                  c0)
+                else withGlyph i (Bar        mst0 rangeMs c0)
         genGlyphs' ((e@(Event' mst track edge)):es) m !havePulses = do
           ((i,ms0), m') <- summon e mst m
           case (drawGlyphsNotBars, edge) of
@@ -134,9 +138,9 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
             (False, _) -> do
               flip maybeM ms0 $ \(mst0,c0) -> do
                 let overrideEnd c0 = case edge of { End c | not (S.null c) -> c; _ -> c0 }
-                if (mst - mst0 < expireTimeMs conf)
-                  then withGlyph i (Bar        mst0 mst                        (overrideEnd c0))
-                  else withGlyph i (ExpiredBar mst0 (mst0 + expireTimeMs conf) (overrideEnd c0))
+                if (mst - mst0 >= expireTimeMs conf && expireTimeMs conf > 0)
+                  then withGlyph i (ExpiredBar mst0 (mst0 + expireTimeMs conf) (overrideEnd c0))
+                  else withGlyph i (Bar        mst0 mst                        (overrideEnd c0))
               let m'' = M.insert track (i, case edge of { Begin c -> Just (mst,c); End _ -> Nothing }) m'
               genGlyphs' es m'' havePulses
         
