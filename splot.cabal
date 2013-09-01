@@ -28,7 +28,7 @@ executable splot
     Build-Depends: base < 3
 
   Build-Depends: cairo, bytestring, bytestring-lexing, strptime >= 0.1.7, time, 
-                 containers, colour, Chart, mtl, HUnit, template-haskell, vcs-revision
+                 containers, colour, mtl, HUnit, template-haskell, vcs-revision
   Other-Modules: Tools.ColorMap Tools.SPlotTest Tools.SPlotTest Tools.StatePlot
   Main-Is: Tools/SPlotMain.hs
   Ghc-Options: -O2 -rtsopts
