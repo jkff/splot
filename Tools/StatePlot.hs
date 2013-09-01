@@ -1,21 +1,20 @@
 {-# LANGUAGE BangPatterns, GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
-module Tools.StatePlot where
+module Tools.StatePlot ( renderEvents
+                       , BarHeight(..)
+                       , CProgram
+                       , parse
+                       , RenderConfiguration(..)
+                       ) where
 
 import Control.Monad.State.Strict as ST
 import qualified Data.Map as M
 import Data.List
-import Data.Ord
-import Data.Function
-import Data.Maybe
 
 import Data.Time
-import Data.Time.Parse
 
 import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.ByteString.Char8 as S
 import Data.ByteString.Lex.Double
-import Graphics.Rendering.Chart
-import qualified Graphics.Rendering.Cairo.Internal as CI
 import qualified Graphics.Rendering.Cairo as C
 import Data.Colour
 import Data.Colour.SRGB
@@ -85,13 +84,30 @@ data RenderConfiguration = RenderConf {
 
 data TickSize = LargeTick | SmallTick
 
-newtype RenderState s a = RenderState { runRenderState :: StateT s CRender a } deriving (Monad, MonadState s)
+newtype RenderState s a = RenderState { runRenderState :: StateT s C.Render a } deriving (Monad, MonadState s)
 
-liftR :: CRender () -> RenderState s ()
+type CProgram = (Double, Double) -> C.Render ()
+
+liftR :: C.Render () -> RenderState s ()
 liftR r = RenderState $ lift r
 
-renderEvents :: RenderConfiguration -> IO [Event] -> Renderable ()
-renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGlyphsAtFront (c $ liftIO readEs)}
+colourChannel c = darken (recip (alphaChannel c)) (c `over` black)
+setSourceColor c = let (RGB r g b) = toSRGB $ colourChannel c
+                   in C.setSourceRGBA r g b (alphaChannel c)
+
+fillRect, strokeLine :: Double -> Double -> Double -> Double -> C.Render ()
+fillRect   !x1 !y1 !x2 !y2 = C.rectangle x1 y1 (x2-x1) (y2-y1) >> C.fill
+strokeLine !x1 !y1 !x2 !y2 = C.moveTo x1 y1 >> C.lineTo x2 y2 >> C.stroke
+
+lineStyle dashes c = do
+  C.setLineWidth 1
+  C.setDash dashes 0
+  C.setLineCap C.LineCapButt
+  C.setLineJoin C.LineJoinMiter
+  setSourceColor c
+
+renderEvents :: RenderConfiguration -> IO [Event] -> CProgram
+renderEvents conf readEs = renderGlyphsAtFront $ liftIO readEs
   where 
     {-# INLINE maybeM #-}
     maybeM :: (Monad m) => (a -> m b) -> Maybe a -> m ()
@@ -156,13 +172,12 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
               _                                -> return ()
             return ((i,Nothing), m')
 
-    renderGlyphsAtFront :: CRender [Event] -> (Double,Double) -> CRender (PickFn a)
+    renderGlyphsAtFront :: C.Render [Event] -> CProgram
     renderGlyphsAtFront readEs (w,h) = do
-      setFillStyle $ solidFillStyle (opaque white)
-      fillPath $ rectPath $ Rect (Point 0 0) (Point w h)
+      setSourceColor $ opaque white
+      fillRect 0 0 w h
       haveGlyphs <- render' readEs (w,h) False
       when haveGlyphs $ (render' readEs (w,h) True >> return ())
-      return nullPickFn
 
     computeTimesTracks es = (a, b, M.size m)
       where
@@ -175,7 +190,7 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
     override' x (Just y) = y
     override' x Nothing  = x
 
-    render' :: CRender [Event] -> (Double,Double) -> Bool -> CRender Bool
+    render' :: C.Render [Event] -> (Double,Double) -> Bool -> C.Render Bool
     render' readEs (w,h) drawGlyphsNotBars = do
       es <- readEs
 
@@ -197,99 +212,76 @@ renderEvents conf readEs = Renderable {minsize = return (0,0), render = renderGl
 
       let legendW = case legendWidth conf of { Just w -> fromIntegral w; Nothing -> 0 }
       let ms2x ms = legendW + 10 + ms / rangeMs * (w - 10 - legendW)
-      let yStep = case barHeight conf of {
-          BarHeightFixed _ -> (h-20) / fromIntegral (numTracks+1)
-        ; BarHeightFill    -> (h-20) / fromIntegral numTracks
-        }
-      let track2y i = case barHeight conf of {
-          BarHeightFixed bh -> fromIntegral (i+1) * yStep - bh/2
-        ; BarHeightFill     -> fromIntegral (i+1) * yStep - yStep/2
-        }
-      let drawTick (t, ms) = c $ do {
-          C.moveTo (ms2x ms + 1) (h-20)
-        ; C.lineTo (ms2x ms + 1) (h-case t of { LargeTick -> 13 ; SmallTick -> 17 })
-        ; C.stroke
-        }
-         
-      let fillRect   !x1 !y1 !x2 !y2 = C.rectangle x1 y1 (x2-x1) (y2-y1) >> C.fill
-      let strokeLine !x1 !y1 !x2 !y2 = C.moveTo x1 y1 >> C.lineTo x2 y2 >> C.stroke
+      let yStep = case barHeight conf of
+            BarHeightFixed _ -> (h-20) / fromIntegral (numTracks+1)
+            BarHeightFill    -> (h-20) / fromIntegral numTracks
+
+      let track2y i = case barHeight conf of
+            BarHeightFixed bh -> fromIntegral (i+1) * yStep - bh/2
+            BarHeightFill     -> fromIntegral (i+1) * yStep - yStep/2
+
+      let drawTick (t, ms) = strokeLine (ms2x ms) (h-20)
+                                        (ms2x ms) (h-case t of { LargeTick -> 13 ; SmallTick -> 17 })
 
       let getColor :: S.ByteString -> RenderState ColorMap (RGB Double)
-          getColor c = do {
+          getColor c = do
             map <- ST.get
-          ; let (color, map') = computeColor map c
-          ; ST.put map'
-          ; return color
-          }
+            let (color, map') = computeColor map c
+            ST.put map'
+            return color
 
       let drawGlyph :: Int -> OutputGlyph -> RenderState ColorMap ()
           drawGlyph !i (Bar !ms1 !ms2 !color)
             | drawGlyphsNotBars = return () 
-            | otherwise = getColor color >>= \(RGB r g b) -> liftR $ c $ do {
-            C.setSourceRGB r g b
-          ; let y = track2y i
-          ; case barHeight conf of {
-              BarHeightFixed bh -> fillRect (ms2x ms1) (y - bh   /2) (ms2x ms2) (y + bh   /2)
-            ; BarHeightFill     -> fillRect (ms2x ms1) (y - yStep/2) (ms2x ms2) (y + yStep/2)
-            } 
-          ; return ()
-          }
+            | otherwise = getColor color >>= \(RGB r g b) -> liftR $ do
+              C.setSourceRGB r g b
+              let y = track2y i
+              case barHeight conf of
+                BarHeightFixed bh -> fillRect (ms2x ms1) (y - bh   /2) (ms2x ms2) (y + bh   /2)
+                BarHeightFill     -> fillRect (ms2x ms1) (y - yStep/2) (ms2x ms2) (y + yStep/2)
+
           drawGlyph i (ExpiredBar ms1 ms2 color) 
             | drawGlyphsNotBars = return ()
-            | otherwise = getColor color >>= \(RGB r g b) -> liftR $ do {
-            setLineStyle $ dashedLine 1 [3,3] (opaque $ sRGB r g b)
-          ; let y = track2y i
-          ; c $ strokeLine (ms2x ms1) y (ms2x ms2) y
-          ; setLineStyle $ solidLine 1 (opaque red)
-          ; c $ strokeLine (ms2x ms2 - 5) (y - 5) (ms2x ms2 + 5) (y + 5)
-          ; c $ strokeLine (ms2x ms2 + 5) (y - 5) (ms2x ms2 - 5) (y + 5)
-          ; return ()
-          }
+            | otherwise = getColor color >>= \(RGB r g b) -> liftR $ do
+              lineStyle [3,3] $ opaque $ sRGB r g b
+              let y = track2y i
+              strokeLine (ms2x ms1) y (ms2x ms2) y
+              lineStyle [] $ opaque red
+              strokeLine (ms2x ms2 - 5) (y - 5) (ms2x ms2 + 5) (y + 5)
+              strokeLine (ms2x ms2 + 5) (y - 5) (ms2x ms2 - 5) (y + 5)
+
           drawGlyph i (OutPulse ms glyph color) 
             | not drawGlyphsNotBars = return () 
-            | otherwise = getColor color >>= \(RGB r g b) -> liftR $ case glyph of {
-            GlyphText text -> do {
-              setLineStyle $ solidLine 1 (opaque $ sRGB r g b)
-            ; let y = track2y i
-            ; moveTo (Point (ms2x ms) y)
-            ; c $ C.showText (S.unpack text)
-            ; return ()
-            }
-          }
+            | otherwise = getColor color >>= \(RGB r g b) -> liftR $ case glyph of
+              GlyphText text -> do
+                lineStyle [] $ opaque $ sRGB r g b
+                let y = track2y i
+                C.moveTo (ms2x ms) y
+                C.showText (S.unpack text)
 
       let drawLegendItem :: Int -> S.ByteString -> RenderState ColorMap ()
-          drawLegendItem !i !s = liftR $ case legendWidth conf of { 
+          drawLegendItem !i !s = liftR $ case legendWidth conf of
             Nothing -> return ()
-          ; Just w -> do {
-                setLineStyle $ solidLine 1 (opaque black)
-              ; let y = track2y i
-              ; C.TextExtents xbear ybear tw th _ _ <- c $ C.textExtents (S.unpack s)
-              ; moveTo (Point (fromIntegral w - tw - xbear - 5) (y - th/2 - ybear))
-              ; c $ C.showText (S.unpack s)
-              }
-          }
+            Just w -> do
+              lineStyle [] $ opaque black
+              let y = track2y i
+              C.TextExtents xbear ybear tw th _ _ <- C.textExtents (S.unpack s)
+              C.moveTo (fromIntegral w - tw - xbear - 5) (y - th/2 - ybear)
+              C.showText (S.unpack s)
 
       when (not drawGlyphsNotBars) $ do
-        c $ C.setAntialias C.AntialiasNone
-        setLineStyle $ solidLine 1 (opaque black)
-        
-        -- Until a bug in Chart is resolved: http://hackage.haskell.org/packages/archive/Chart/0.13.1/doc/html/src/Graphics-Rendering-Chart-Types.html
-        -- setLineStyle for a solid line doesn't clear dashes because it doesn't call setDash if line_dashes_ ls is [] (???)
-        c $ C.setDash [] 0
+        C.setAntialias C.AntialiasNone
+        lineStyle [] $ opaque black
 
-        moveTo (Point (legendW+10) (h-20))
-        lineTo (Point w            (h-20))
-        c $ C.stroke
-        moveTo (Point (legendW+10) (h-20))
-        lineTo (Point (legendW+10) 0)
-        c $ C.stroke
+        strokeLine (legendW+10) (h-20) w (h-20)
+        strokeLine (legendW+10) (h-20) (legendW+10) 0
         mapM_ drawTick ticks
-        moveTo (Point (legendW+10) (h-3))
-        c $ C.setAntialias C.AntialiasGray
-        c $ C.setFontSize 12
-        c $ C.showText $ "Origin at " ++ show minRenderLocalTime ++ ", 1 small tick = " ++ show (tickIntervalMs conf) ++ "ms"
+        C.moveTo (legendW+10) (h-3)
+        C.setAntialias C.AntialiasGray
+        C.setFontSize 12
+        C.showText $ "Origin at " ++ show minRenderLocalTime ++ ", 1 small tick = " ++ show (tickIntervalMs conf) ++ "ms"
 
-      c $ C.setAntialias C.AntialiasSubpixel
+      C.setAntialias C.AntialiasSubpixel
       let colorMap = prepareColorMap (colorWheels conf)
       evalStateT (runRenderState $ genGlyphs time2ms rangeMs es drawGlyphsNotBars drawGlyph drawLegendItem) colorMap
 

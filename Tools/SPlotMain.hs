@@ -12,7 +12,7 @@ import System.Exit
 import Data.Time
 import Data.Time.Parse
 
-import Graphics.Rendering.Chart.Renderable(renderableToPNGFile)
+import qualified Graphics.Rendering.Cairo as C
 
 import Data.Maybe(fromMaybe,isNothing)
 import Data.Ord(comparing)
@@ -124,6 +124,12 @@ showGitVersion = $(do
 
 addSeconds d t = utcToLocalTime utc (addUTCTime (fromRational $ toRational d) (localTimeToUTC utc t))
 
+cprogramToPNGFile :: CProgram -> Int -> Int -> FilePath -> IO ()
+cprogramToPNGFile prog w h file = do
+  C.withImageSurface C.FormatARGB32 w h $ \result -> do
+    C.renderWith result $ prog (fromIntegral w, fromIntegral h)
+    C.surfaceWriteToPNG result file
+
 main = do
   args <- getArgs
   when (null args || args == ["--help"]) $ showHelp >> exitSuccess
@@ -160,5 +166,4 @@ main = do
   let colorMaps = [(S.pack scheme, map S.pack (words wheel)) | ("-colorscheme":scheme:wheel:_) <- tails args ] 
 
   let pic = renderEvents (RenderConf barHeight tickIntervalMs largeTickFreq expireTimeMs phantomColor fromTime toTime forcedNumTracks colorMaps legendWidth) readEvents
-  renderableToPNGFile pic w h outPNG
-
+  cprogramToPNGFile pic w h outPNG
