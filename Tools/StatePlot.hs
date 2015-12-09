@@ -84,7 +84,7 @@ data RenderConfiguration = RenderConf {
 
 data TickSize = LargeTick | SmallTick
 
-newtype RenderState s a = RenderState { runRenderState :: StateT s C.Render a } deriving (Monad, MonadState s)
+newtype RenderState s a = RenderState { runRenderState :: StateT s C.Render a } deriving (Functor,Applicative,Monad, MonadState s)
 
 type CProgram = (Double, Double) -> C.Render ()
 
