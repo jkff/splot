@@ -21,7 +21,7 @@ import Data.List (tails)
 
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as B
-import Data.ByteString.Lex.Lazy.Double
+import Data.ByteString.Lex.Fractional
 
 import Control.Monad (when)
 
@@ -144,24 +144,24 @@ main = do
   let Just (ourBaseTime,_) = strptime "%Y-%m-%d %H:%M:%OS" "1900-01-01 00:00:00" 
   let ourStrptime = if timeFormat == "elapsed" 
                     then \s -> do
-                      (d, s') <- readDouble s
+                      (d, s') <- readDecimal s
                       return (addSeconds d ourBaseTime, s')
-                    else strptime (B.pack timeFormat)
+                    else strptime (S.pack timeFormat)
   let ptime = ourStrptime
   let parseTime s = fromMaybe (error $ "Invalid time: " ++ show s) . ptime $ s
-  let fromTime = fst `fmap` (ptime $ B.pack $ getArg "fromTime" "" args)
-  let toTime = fst `fmap` (ptime $ B.pack $ getArg "toTime" "" args)
+  let fromTime = fst `fmap` (ptime $ S.pack $ getArg "fromTime" "" args)
+  let toTime = fst `fmap` (ptime $ S.pack $ getArg "toTime" "" args)
   let forcedNumTracks = case getArg "numTracks" "" args of { "" -> Nothing ; n -> Just $ read n }
   let outPNG = getArg "o" "" args
   let inputFile = getArg "if" (error "Input file not specified") args
-  let pruneLF b | not (B.null b) && (B.last b == '\r') = B.init b
+  let pruneLF b | not (S.null b) && (S.last b == '\r') = S.init b
                 | otherwise                            = b
   let expireTimeMs = read $ getArg "expire" "Infinity" args
   let phantomColor = case getArg "phantom" "" args of { "" -> Nothing; c -> Just (S.pack c) }
   let legendWidth = case getArg "legendWidth" "0" args of { "0" -> Nothing; n -> Just (read n) }
 
   let readInput = if inputFile == "-" then B.getContents else B.readFile inputFile
-  let readEvents = (map (parse parseTime . pruneLF) . B.lines) `fmap` readInput
+  let readEvents = (map (parse parseTime . pruneLF) . map B.toStrict . B.lines) `fmap` readInput
   
   let colorMaps = [(S.pack scheme, map S.pack (words wheel)) | ("-colorscheme":scheme:wheel:_) <- tails args ] 
 

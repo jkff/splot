@@ -12,9 +12,8 @@ import Data.List
 
 import Data.Time
 
-import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.ByteString.Char8 as S
-import Data.ByteString.Lex.Double
+import Data.ByteString.Lex.Fractional
 import qualified Graphics.Rendering.Cairo as C
 import Data.Colour
 import Data.Colour.SRGB
@@ -38,25 +37,23 @@ data OutputGlyph = Bar {-# UNPACK #-} !Double !Double !S.ByteString
                  | ExpiredBar {-# UNPACK #-} !Double !Double !S.ByteString 
                  | OutPulse {-# UNPACK #-} !Double !Glyph !S.ByteString deriving (Show)
 
-parse :: (B.ByteString -> (LocalTime, B.ByteString)) -> B.ByteString -> Event
-parse parseTime s = Event { localTime = ts, utcTime = localTimeToUTC utc ts, track = repack $ B.tail track', edge = edge }
+parse :: (S.ByteString -> (LocalTime, S.ByteString)) -> S.ByteString -> Event
+parse parseTime s = Event { localTime = ts, utcTime = localTimeToUTC utc ts, track = S.tail track', edge = edge }
   where
     (ts, s') = parseTime s
-    (track', arg0) = B.break (==' ') (B.tail s')
-    arg = if B.null arg0 then S.empty else trim $ repack (B.tail arg0)
-    edge = case (B.head track') of
+    (track', arg0) = S.break (==' ') (S.tail s')
+    arg = if S.null arg0 then S.empty else trim (S.tail arg0)
+    edge = case (S.head track') of
       '>' -> Begin (if S.null arg then grayStr else arg)
       '<' -> End   (if S.null arg then S.empty else arg)
       '=' -> Both  duration color
         where (durationS, color0) = S.break (==' ') arg
               color = S.tail color0
-              Just (duration, _) = readDouble durationS
+              Just (duration, _) = readDecimal durationS
       '!' -> Pulse (GlyphText text) color
         where (color, text0) = S.break (==' ') arg
               text = S.tail text0
     trim = fst . S.spanEnd isSpace
-
-repack = S.concat . B.toChunks
 
 grayStr = S.pack "gray"
 
